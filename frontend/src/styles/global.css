@@ -8,7 +8,7 @@
 }
 
 :root {
-  /* Color Palette — Teal / Emerald (no blue, no purple) */
+  /* Color Palette — Teal / Emerald (preserved from original) */
   --color-primary: #0F766E;
   --color-primary-hover: #0D6E66;
   --color-primary-light: #CCFBF1;
@@ -36,8 +36,18 @@
   --color-warning: #F59E0B;
   --color-warning-light: #FFFBEB;
 
+  /* Chat-specific tokens */
+  --color-user-bubble: #0F766E;
+  --color-user-text: #FFFFFF;
+  --color-bot-bubble: #F1F5F9;
+  --color-bot-text: #1E293B;
+  --color-disclaimer-bg: #FEF3C7;
+  --color-disclaimer-border: #F59E0B;
+  --color-disclaimer-text: #92400E;
+
   /* Typography */
   --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-heading: 'Outfit', 'Inter', -apple-system, sans-serif;
 
   /* Spacing */
   --space-xs: 4px;
@@ -69,6 +79,7 @@
   /* Layout */
   --max-width: 1200px;
   --nav-height: 64px;
+  --input-height: 80px;
 }
 
 html {
@@ -95,6 +106,7 @@ body {
    TYPOGRAPHY
    ============================================ */
 h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
   line-height: 1.3;
   font-weight: 600;
   color: var(--color-text);
@@ -150,12 +162,32 @@ p {
   }
 }
 
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes typingDot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-4px); }
+}
+
 .animate-fade-in {
   animation: fadeIn var(--transition-slow) ease both;
 }
 
 .animate-fade-in-scale {
   animation: fadeInScale var(--transition-slow) ease both;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.35s ease both;
 }
 
 /* ============================================

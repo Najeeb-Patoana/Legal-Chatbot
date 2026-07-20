@@ -1,5 +1,5 @@
 import styles from './Navbar.module.css'
-import { FiFileText } from 'react-icons/fi'
+import { FiShield } from 'react-icons/fi'
 
 export default function Navbar() {
   return (
@@ -8,11 +8,11 @@ export default function Navbar() {
         {/* Brand */}
         <div className={styles.brand}>
           <div className={styles.logoIcon}>
-            <FiFileText size={19} />
+            <FiShield size={19} />
           </div>
           <div className={styles.brandText}>
-            <span className={styles.brandName}>PDF Intelligence</span>
-            <span className={styles.brandTagline}>AI-Powered Document Q&amp;A</span>
+            <span className={styles.brandName}>US Legal Knowledge Base</span>
+            <span className={styles.brandTagline}>AI-Powered Legal Information</span>
           </div>
         </div>
 

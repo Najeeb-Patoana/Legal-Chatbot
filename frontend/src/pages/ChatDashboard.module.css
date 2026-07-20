@@ -1,0 +1,402 @@
+/* ============================================
+   CHAT DASHBOARD — ChatGPT-style layout
+   ============================================ */
+
+.chatContainer {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--nav-height));
+  max-height: calc(100vh - var(--nav-height));
+  overflow: hidden;
+}
+
+/* ── Legal Disclaimer Banner ──────────────── */
+.disclaimer {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-lg);
+  background: var(--color-disclaimer-bg);
+  border-bottom: 2px solid var(--color-disclaimer-border);
+  flex-shrink: 0;
+}
+
+.disclaimerIcon {
+  color: var(--color-disclaimer-text);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.disclaimerText {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--color-disclaimer-text);
+  margin: 0;
+}
+
+/* ── Messages Area ────────────────────────── */
+.messagesArea {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg) 0;
+  scroll-behavior: smooth;
+}
+
+/* ── Empty State ──────────────────────────── */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-3xl) var(--space-lg);
+  min-height: 60vh;
+  animation: fadeIn 0.5s ease both;
+}
+
+.emptyIcon {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-primary-light), var(--color-accent-light));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-primary);
+  margin-bottom: var(--space-lg);
+}
+
+.emptyTitle {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-bottom: var(--space-sm);
+}
+
+.emptyDesc {
+  font-size: 0.95rem;
+  color: var(--color-text-muted);
+  max-width: 480px;
+  margin-bottom: var(--space-xl);
+  line-height: 1.6;
+}
+
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  justify-content: center;
+  max-width: 600px;
+}
+
+.suggestionChip {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  padding: var(--space-sm) var(--space-md);
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition-base);
+  font-family: var(--font-family);
+  line-height: 1.4;
+}
+
+.suggestionChip:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── Message Row ──────────────────────────── */
+.messageRow {
+  display: flex;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-lg);
+  max-width: 860px;
+  margin: 0 auto;
+  width: 100%;
+  align-items: flex-start;
+}
+
+.messageRow.user {
+  flex-direction: row-reverse;
+}
+
+.messageRow.assistant {
+  flex-direction: row;
+}
+
+/* ── Avatars ──────────────────────────────── */
+.avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.avatar_user {
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  color: #fff;
+}
+
+.avatar_assistant {
+  background: linear-gradient(135deg, #E2E8F0, #CBD5E1);
+  color: #475569;
+}
+
+/* ── Message Bubbles ──────────────────────── */
+.bubble {
+  max-width: 72%;
+  padding: var(--space-md) var(--space-md);
+  border-radius: var(--radius-lg);
+  position: relative;
+  word-break: break-word;
+}
+
+.user .bubble {
+  background: var(--color-user-bubble);
+  color: var(--color-user-text);
+  border-bottom-right-radius: var(--radius-sm);
+}
+
+.assistant .bubble {
+  background: var(--color-bot-bubble);
+  color: var(--color-bot-text);
+  border-bottom-left-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+}
+
+.errorBubble {
+  background: var(--color-error-light) !important;
+  color: var(--color-error) !important;
+  border: 1px solid var(--color-error-border);
+}
+
+/* ── Bubble Content ───────────────────────── */
+.bubbleContent {
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+
+.messageParagraph {
+  margin-bottom: var(--space-sm);
+  color: inherit;
+}
+
+.messageParagraph:last-child {
+  margin-bottom: 0;
+}
+
+.user .messageParagraph {
+  color: var(--color-user-text);
+}
+
+.inlineCode {
+  background: rgba(0, 0, 0, 0.08);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.85em;
+}
+
+.user .inlineCode {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* ── Bubble Meta ──────────────────────────── */
+.bubbleMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-xs);
+  gap: var(--space-sm);
+}
+
+.timestamp {
+  font-size: 0.68rem;
+  opacity: 0.55;
+}
+
+.copyBtn {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+  font-family: var(--font-family);
+}
+
+.copyBtn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--color-primary);
+}
+
+/* ── Typing Indicator ─────────────────────── */
+.typingIndicator {
+  display: flex;
+  gap: 5px;
+  padding: var(--space-xs) var(--space-sm);
+  align-items: center;
+}
+
+.typingDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-text-light);
+  animation: typingDot 1.4s infinite;
+}
+
+.typingDot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typingDot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* ── Input Bar ────────────────────────────── */
+.inputBar {
+  flex-shrink: 0;
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+}
+
+.inputContainer {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-sm);
+  max-width: 820px;
+  margin: 0 auto;
+  background: var(--color-bg);
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xs) var(--space-xs) var(--space-xs) var(--space-md);
+  transition: border-color var(--transition-base), box-shadow var(--transition-base);
+}
+
+.inputContainer:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-focus);
+}
+
+.chatInput {
+  flex: 1;
+  border: none;
+  background: none;
+  font-size: 0.9rem;
+  font-family: var(--font-family);
+  color: var(--color-text);
+  resize: none;
+  padding: var(--space-sm) 0;
+  min-height: 24px;
+  max-height: 120px;
+  line-height: 1.5;
+  outline: none;
+}
+
+.chatInput::placeholder {
+  color: var(--color-text-light);
+}
+
+.chatInput:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sendBtn {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: var(--color-primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--transition-base);
+}
+
+.sendBtn:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  transform: scale(1.04);
+}
+
+.sendBtn:disabled {
+  background: var(--color-border);
+  color: var(--color-text-light);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.inputHint {
+  text-align: center;
+  font-size: 0.68rem;
+  color: var(--color-text-light);
+  margin-top: var(--space-xs);
+}
+
+/* ── Responsive ───────────────────────────── */
+@media (max-width: 768px) {
+  .messageRow {
+    padding: var(--space-sm) var(--space-md);
+  }
+
+  .bubble {
+    max-width: 85%;
+  }
+
+  .emptyState {
+    padding: var(--space-xl) var(--space-md);
+    min-height: 50vh;
+  }
+
+  .emptyTitle {
+    font-size: 1.3rem;
+  }
+
+  .suggestions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .inputBar {
+    padding: var(--space-sm) var(--space-md);
+  }
+
+  .disclaimer {
+    padding: var(--space-sm) var(--space-md);
+  }
+}
+
+@media (max-width: 480px) {
+  .avatar {
+    width: 28px;
+    height: 28px;
+  }
+
+  .avatar svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .bubbleContent {
+    font-size: 0.84rem;
+  }
+}

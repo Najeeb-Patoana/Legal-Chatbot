@@ -13,7 +13,7 @@ export default function Footer() {
   return (
     <footer className={styles.footer}>
       <div className={`container ${styles.inner}`}>
-        <p className={styles.copy}>&copy; {year} PDF Intelligence</p>
+        <p className={styles.copy}>&copy; {year} US Legal Knowledge Base</p>
 
         <div className={styles.techRow}>
           <span className={styles.poweredBy}>Powered by</span>

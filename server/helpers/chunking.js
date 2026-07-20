@@ -1,7 +1,7 @@
 /**
- 
+ * Chunk unstructured plain text into semantic groups.
  *
- * @param {string} text       Raw text extracted from pdf-parse
+ * @param {string} text       Raw text (from PDFs, opinions, etc.)
  * @param {number} targetWords Target words per chunk (default 600)
  * @param {number} minWords    Minimum words to keep a chunk (default 25)
  * @returns {string[]}
@@ -71,4 +71,17 @@ function chunkText(text, targetWords = 600, minWords = 25) {
     return chunks;
 }
 
-module.exports = { chunkText };
+/**
+ * Extract clean text from an XML node and all of its descendant text nodes.
+ * Collapses excessive whitespace into single spaces.
+ *
+ * @param {Node} node  DOM node
+ * @returns {string}   Cleaned text content
+ */
+function extractNodeText(node) {
+    if (!node) return "";
+    const raw = node.textContent || "";
+    return raw.replace(/\s+/g, " ").trim();
+}
+
+module.exports = { chunkText, extractNodeText };

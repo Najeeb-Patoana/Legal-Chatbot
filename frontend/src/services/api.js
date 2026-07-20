@@ -1,12 +1,10 @@
 import axios from 'axios'
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
-
+// All requests go through the Vite dev proxy → /api/* → backend
+// No external URLs, no API keys, no direct backend references
 const api = axios.create({
-  baseURL: BASE_URL,
-  timeout: 300_000, // 5 minutes max for large PDFs
+  timeout: 120_000,
 })
-
 
 /**
  * Parse an Axios error into a safe, user-facing message.
@@ -25,47 +23,24 @@ function parseApiError(err) {
   }
   // Request timed out
   if (err?.code === 'ECONNABORTED') {
-    return 'The request timed out. Your PDF may be very large — please try again.'
+    return 'The request timed out. Please try again.'
   }
   // Fallback — deliberately vague
   return 'Something went wrong. Please try again.'
 }
 
 /**
- * Upload a PDF and index it in Qdrant.
- * The document is processed ONCE. Use the returned documentId for all questions.
+ * Ask a legal question or send a casual message.
+ * Routed through the server's intent detection.
  *
- * @param {File} pdfFile
- * @returns {Promise<{ documentId: string, chunkCount: number, message: string }>}
- */
-export async function uploadPDF(pdfFile) {
-  try {
-    const formData = new FormData()
-    formData.append('pdf', pdfFile)
-
-    const response = await api.post('/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    })
-
-    return response.data
-  } catch (err) {
-    throw new Error(parseApiError(err))
-  }
-}
-
-/**
- * Ask a question about an already-indexed PDF.
- * Only the question is embedded — the PDF is NOT re-processed.
- *
- * @param {string} documentId - returned by uploadPDF()
  * @param {string} question
  * @returns {Promise<string>} AI-generated answer
  */
-export async function askQuestion(documentId, question) {
+export async function askLegalQuestion(question) {
   try {
     const response = await api.post(
-      '/ask',
-      { documentId, question },
+      '/api/legal/ask',
+      { question },
       { headers: { 'Content-Type': 'application/json' } }
     )
     return response.data.answer
