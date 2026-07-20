@@ -1,0 +1,24 @@
+# Dependencies
+**/node_modules/
+
+# Environment files — NEVER commit API keys
+**/.env
+**/.env.*
+**/.env.local
+**/.env.production
+
+# Uploaded files (transient — never store PDFs)
+**/uploads/
+
+# Frontend build output
+frontend/dist/
+frontend/.vite/
+
+# Editor / OS artifacts
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+
+# Crash reports
+npm-debug.log*

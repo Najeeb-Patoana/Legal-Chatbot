@@ -1,0 +1,92 @@
+.header {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  height: var(--nav-height);
+  display: flex;
+  align-items: center;
+  box-shadow: var(--shadow-sm);
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.logoIcon {
+  width: 36px;
+  height: 36px;
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  flex-shrink: 0;
+}
+
+.brandText {
+  display: flex;
+  flex-direction: column;
+}
+
+.brandName {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-text);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.brandTagline {
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  font-weight: 400;
+  line-height: 1;
+}
+
+@media (max-width: 480px) {
+  .brandTagline {
+    display: none;
+  }
+}
+
+/* ── Author ─────────────────────────────────────────────────────────────────── */
+.author {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.authorBy {
+  font-size: 0.72rem;
+  color: var(--color-text-light);
+  font-weight: 400;
+}
+
+.authorName {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  letter-spacing: -0.01em;
+}
+
+@media (max-width: 480px) {
+  .authorBy {
+    display: none;
+  }
+
+  .authorName {
+    font-size: 0.75rem;
+  }
+}
