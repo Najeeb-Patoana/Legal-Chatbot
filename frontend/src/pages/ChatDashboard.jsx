@@ -1,18 +1,16 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { FiSend, FiAlertTriangle, FiShield, FiCpu, FiUser, FiCopy, FiCheck } from 'react-icons/fi'
+import { FiSend, FiAlertTriangle, FiShield, FiUser, FiCopy, FiCheck, FiBookOpen, FiBookmark, FiHelpCircle } from 'react-icons/fi'
 import { askLegalQuestion } from '../services/api.js'
 import styles from './ChatDashboard.module.css'
 
 /**
  * ChatDashboard — ChatGPT-style interface for the US Legal Knowledge Base.
  *
- * Features:
  * - User messages aligned right (teal bubbles)
- * - Bot messages aligned left (light gray bubbles)
+ * - Bot messages aligned left (light surface bubbles)
  * - Permanent legal disclaimer banner
- * - Auto-scroll to latest message
- * - Copy-to-clipboard on bot responses
- * - Typing indicator while waiting
+ * - Auto-scroll, typing indicator, copy-to-clipboard
+ * - Rich empty state with suggestion cards
  */
 export default function ChatDashboard() {
   const [messages, setMessages] = useState([])
@@ -20,17 +18,29 @@ export default function ChatDashboard() {
   const [isLoading, setIsLoading] = useState(false)
   const [copiedId, setCopiedId] = useState(null)
   const messagesEndRef = useRef(null)
-  const inputRef = useRef(null)
+  const textareaRef = useRef(null)
 
-  // Auto-scroll to bottom when messages change
+  // Auto-scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
 
   // Focus input on mount
   useEffect(() => {
-    inputRef.current?.focus()
+    textareaRef.current?.focus()
   }, [])
+
+  // Auto-resize textarea
+  const adjustTextareaHeight = useCallback(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 150) + 'px'
+  }, [])
+
+  useEffect(() => {
+    adjustTextareaHeight()
+  }, [input, adjustTextareaHeight])
 
   const handleCopy = useCallback((text, id) => {
     navigator.clipboard.writeText(text)
@@ -46,7 +56,7 @@ export default function ChatDashboard() {
       id: Date.now(),
       role: 'user',
       text: trimmed,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     }
 
     setMessages((prev) => [...prev, userMessage])
@@ -55,27 +65,29 @@ export default function ChatDashboard() {
 
     try {
       const answer = await askLegalQuestion(trimmed)
-
-      const botMessage = {
-        id: Date.now() + 1,
-        role: 'assistant',
-        text: answer,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      }
-
-      setMessages((prev) => [...prev, botMessage])
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now() + 1,
+          role: 'assistant',
+          text: answer,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ])
     } catch (err) {
-      const errorMessage = {
-        id: Date.now() + 1,
-        role: 'assistant',
-        text: err.message || 'Something went wrong. Please try again.',
-        isError: true,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      }
-      setMessages((prev) => [...prev, errorMessage])
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now() + 1,
+          role: 'assistant',
+          text: err.message || 'Something went wrong. Please try again.',
+          isError: true,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ])
     } finally {
       setIsLoading(false)
-      inputRef.current?.focus()
+      textareaRef.current?.focus()
     }
   }
 
@@ -86,24 +98,23 @@ export default function ChatDashboard() {
     }
   }
 
-  /**
-   * Render message text with basic formatting:
-   * - Paragraphs split by double newlines
-   * - Bold text **like this**
-   * - Inline code `like this`
-   */
-  const renderMessageText = (text) => {
-    const paragraphs = text.split(/\n{2,}/)
+  const useSuggestion = (text) => {
+    setInput(text)
+    textareaRef.current?.focus()
+  }
 
-    return paragraphs.map((para, pIdx) => {
-      // Split single newlines within a paragraph
+  // ── Render Helpers ──────────────────────────────────────────────────────────
+
+  const renderText = (text) => {
+    const paragraphs = text.split(/\n{2,}/)
+    return paragraphs.map((para, pi) => {
       const lines = para.split('\n')
       return (
-        <p key={pIdx} className={styles.messageParagraph}>
-          {lines.map((line, lIdx) => (
-            <span key={lIdx}>
-              {lIdx > 0 && <br />}
-              {renderInlineFormatting(line)}
+        <p key={pi} className={styles.paragraph}>
+          {lines.map((line, li) => (
+            <span key={li}>
+              {li > 0 && <br />}
+              {formatInline(line)}
             </span>
           ))}
         </p>
@@ -111,125 +122,137 @@ export default function ChatDashboard() {
     })
   }
 
-  const renderInlineFormatting = (text) => {
-    // Handle **bold** and `code`
+  const formatInline = (text) => {
     const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g)
     return parts.map((part, i) => {
-      if (part.startsWith('**') && part.endsWith('**')) {
+      if (part.startsWith('**') && part.endsWith('**'))
         return <strong key={i}>{part.slice(2, -2)}</strong>
-      }
-      if (part.startsWith('`') && part.endsWith('`')) {
-        return <code key={i} className={styles.inlineCode}>{part.slice(1, -1)}</code>
-      }
+      if (part.startsWith('`') && part.endsWith('`'))
+        return <code key={i} className={styles.code}>{part.slice(1, -1)}</code>
       return part
     })
   }
 
+  // ── Render ──────────────────────────────────────────────────────────────────
+
+  const suggestions = [
+    { icon: <FiBookmark size={16} />, text: 'What does 17 USC § 107 say about fair use?' },
+    { icon: <FiBookOpen size={16} />, text: 'Explain the Fourth Amendment protections against unreasonable searches' },
+    { icon: <FiHelpCircle size={16} />, text: 'What is the legal standard for summary judgment in federal court?' },
+  ]
+
   return (
-    <div className={styles.chatContainer}>
-      {/* Permanent Legal Disclaimer Banner */}
-      <div className={styles.disclaimer} role="alert" id="legal-disclaimer-banner">
-        <FiAlertTriangle size={16} className={styles.disclaimerIcon} />
-        <p className={styles.disclaimerText}>
-          <strong>Legal Information Only</strong> — This tool provides general legal information
-          retrieved from indexed federal statutes and judicial opinions. It does{' '}
-          <strong>not</strong> constitute legal advice, and no attorney-client relationship is
-          formed. Always consult a licensed attorney for your specific situation.
-        </p>
+    <div className={styles.container}>
+      {/* ── Disclaimer Banner ── */}
+      <div className={styles.banner} role="alert" id="legal-disclaimer-banner">
+        <div className={styles.bannerInner}>
+          <FiAlertTriangle size={15} className={styles.bannerIcon} />
+          <p className={styles.bannerText}>
+            <strong>Legal Information Only</strong> — This tool provides general legal information
+            from indexed federal statutes and judicial opinions. It is <strong>not</strong> legal
+            advice and does not create an attorney-client relationship.
+          </p>
+        </div>
       </div>
 
-      {/* Chat Messages Area */}
-      <div className={styles.messagesArea} id="chat-messages-area">
-        {messages.length === 0 && (
-          <div className={styles.emptyState}>
-            <div className={styles.emptyIcon}>
-              <FiShield size={40} />
+      {/* ── Messages ── */}
+      <div className={styles.messages} id="chat-messages-area">
+        {messages.length === 0 ? (
+          <div className={styles.empty}>
+            <div className={styles.emptyLogo}>
+              <div className={styles.emptyLogoInner}>
+                <FiShield size={32} />
+              </div>
             </div>
-            <h2 className={styles.emptyTitle}>US Legal Knowledge Base</h2>
-            <p className={styles.emptyDesc}>
-              Ask questions about federal statutes, case law, or legal concepts.
-              I'll search through indexed legal documents to provide accurate, cited information.
+            <h1 className={styles.emptyTitle}>US Legal Knowledge Base</h1>
+            <p className={styles.emptySubtitle}>
+              Ask about federal statutes, case law, or legal concepts.
+              Responses are grounded in indexed legal documents with inline citations.
             </p>
-            <div className={styles.suggestions}>
-              {[
-                'What does 17 USC § 107 say about fair use?',
-                'Explain the Fourth Amendment protections',
-                'What is the standard for summary judgment?',
-              ].map((q, i) => (
+
+            <div className={styles.cards}>
+              {suggestions.map((s, i) => (
                 <button
                   key={i}
-                  className={styles.suggestionChip}
-                  onClick={() => { setInput(q); inputRef.current?.focus() }}
+                  className={styles.card}
+                  onClick={() => useSuggestion(s.text)}
                   id={`suggestion-${i}`}
                 >
-                  {q}
+                  <span className={styles.cardIcon}>{s.icon}</span>
+                  <span className={styles.cardText}>{s.text}</span>
                 </button>
               ))}
             </div>
           </div>
-        )}
+        ) : (
+          <div className={styles.thread}>
+            {messages.map((msg) => (
+              <div key={msg.id} className={`${styles.row} ${styles[msg.role]}`} id={`message-${msg.id}`}>
+                {/* Avatar */}
+                <div className={`${styles.avatar} ${styles[`av_${msg.role}`]}`}>
+                  {msg.role === 'user' ? <FiUser size={15} /> : <FiShield size={15} />}
+                </div>
 
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`${styles.messageRow} ${styles[msg.role]} animate-slide-up`}
-            id={`message-${msg.id}`}
-          >
-            {/* Avatar */}
-            <div className={`${styles.avatar} ${styles[`avatar_${msg.role}`]}`}>
-              {msg.role === 'user' ? <FiUser size={16} /> : <FiCpu size={16} />}
-            </div>
+                {/* Content */}
+                <div className={styles.content}>
+                  <div className={styles.meta}>
+                    <span className={styles.roleName}>
+                      {msg.role === 'user' ? 'You' : 'Legal Assistant'}
+                    </span>
+                    <span className={styles.time}>{msg.time}</span>
+                  </div>
 
-            {/* Bubble */}
-            <div className={`${styles.bubble} ${msg.isError ? styles.errorBubble : ''}`}>
-              <div className={styles.bubbleContent}>
-                {renderMessageText(msg.text)}
+                  <div className={`${styles.bubble} ${msg.isError ? styles.error : ''}`}>
+                    {renderText(msg.text)}
+                  </div>
+
+                  {msg.role === 'assistant' && !msg.isError && (
+                    <button
+                      className={styles.copyBtn}
+                      onClick={() => handleCopy(msg.text, msg.id)}
+                      aria-label="Copy response"
+                    >
+                      {copiedId === msg.id
+                        ? <><FiCheck size={13} /> Copied</>
+                        : <><FiCopy size={13} /> Copy</>
+                      }
+                    </button>
+                  )}
+                </div>
               </div>
+            ))}
 
-              <div className={styles.bubbleMeta}>
-                <span className={styles.timestamp}>{msg.timestamp}</span>
-                {msg.role === 'assistant' && !msg.isError && (
-                  <button
-                    className={styles.copyBtn}
-                    onClick={() => handleCopy(msg.text, msg.id)}
-                    title="Copy response"
-                    aria-label="Copy response to clipboard"
-                  >
-                    {copiedId === msg.id ? <FiCheck size={12} /> : <FiCopy size={12} />}
-                    <span>{copiedId === msg.id ? 'Copied' : 'Copy'}</span>
-                  </button>
-                )}
+            {/* Typing indicator */}
+            {isLoading && (
+              <div className={`${styles.row} ${styles.assistant}`}>
+                <div className={`${styles.avatar} ${styles.av_assistant}`}>
+                  <FiShield size={15} />
+                </div>
+                <div className={styles.content}>
+                  <div className={styles.meta}>
+                    <span className={styles.roleName}>Legal Assistant</span>
+                  </div>
+                  <div className={styles.bubble}>
+                    <div className={styles.dots}>
+                      <span /><span /><span />
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
+
+            <div ref={messagesEndRef} />
           </div>
-        ))}
-
-        {/* Typing Indicator */}
-        {isLoading && (
-          <div className={`${styles.messageRow} ${styles.assistant} animate-slide-up`}>
-            <div className={`${styles.avatar} ${styles.avatar_assistant}`}>
-              <FiCpu size={16} />
-            </div>
-            <div className={styles.bubble}>
-              <div className={styles.typingIndicator}>
-                <span className={styles.typingDot} />
-                <span className={styles.typingDot} />
-                <span className={styles.typingDot} />
-              </div>
-            </div>
-          </div>
         )}
-
-        <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Bar — fixed at bottom */}
-      <div className={styles.inputBar}>
-        <div className={styles.inputContainer}>
+      {/* ── Input ── */}
+      <div className={styles.inputArea}>
+        <div className={styles.inputWrap}>
           <textarea
-            ref={inputRef}
+            ref={textareaRef}
             id="chat-input"
-            className={styles.chatInput}
+            className={styles.textarea}
             placeholder="Ask a legal question or say hello…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -242,15 +265,15 @@ export default function ChatDashboard() {
             className={styles.sendBtn}
             onClick={handleSend}
             disabled={!input.trim() || isLoading}
-            title="Send message"
+            title="Send message (Enter)"
             aria-label="Send message"
             id="send-btn"
           >
-            <FiSend size={18} />
+            <FiSend size={17} />
           </button>
         </div>
-        <p className={styles.inputHint}>
-          Press Enter to send · Shift+Enter for new line
+        <p className={styles.hint}>
+          Enter to send · Shift+Enter for new line · Responses cite indexed federal sources
         </p>
       </div>
     </div>

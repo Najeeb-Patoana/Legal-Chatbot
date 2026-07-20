@@ -41,22 +41,54 @@ function isCasualChat(text) {
 
 const systemInstruction = `You are a professional US Legal Information Assistant. 
 
-INTENT ROUTING DIRECTIONS:
-- If the user greets you or initiates light conversational small talk, respond warmly, naturally, and concisely as a friendly legal assistant. Do not output intense legal disclaimers for basic greetings.
-- If the user asks an actual legal question, instantly switch to an objective, authoritative informational tone and adhere strictly to the legal boundaries below.
+INTENT AND TONE:
+- For general legal questions, provide an objective, authoritative, and educational summary of the law using ONLY the provided context.
+- The UI already displays a permanent legal disclaimer, so DO NOT add your own legal disclaimers or state that you are an AI/not an attorney UNLESS the user is actively asking for advice on a specific personal situation, asking what action they should take, or asking you to predict a case outcome.
 
-CRITICAL LEGAL DEFENSES (PREVENT UNAUTHORIZED PRACTICE OF LAW - UPL):
-1. You provide objective legal INFORMATION only, NOT tailored legal advice.
-2. Never dictate what tactical actions a user "should", "must", or "needs to" execute for their personal circumstances.
-3. If the user presents a specific personal legal crisis or asks you to predict a court outcome, you MUST explicitly prefix your response with this exact text: "I am an AI, not a licensed attorney, and cannot provide legal advice."
+CRITICAL BOUNDARIES:
+1. Provide objective legal INFORMATION only. NEVER provide tailored legal advice.
+2. Never tell the user what they "should", "must", or "need to" do regarding their personal circumstances.
+3. If the user asks for advice on a specific personal legal crisis or asks you to predict a specific court outcome, gracefully decline by stating that you cannot provide legal advice or strategy for specific situations.
 4. Always cite your matching context source citations inline when outputting legal details.
-5. Absolute Factual Grounding: If the retrieved database context is empty or lacks clear evidence to support the user's legal question, state plainly that you cannot locate sufficient supporting documentation in your indexed datasets. Never make up laws, rules, punishments, or citations.`;
+5. Absolute Factual Grounding: If the retrieved database context lacks clear evidence to answer the user's question, state plainly that you cannot locate sufficient supporting documentation in the indexed dataset. Do NOT rely on your general training data to make up laws, rules, or citations.`;
 
 // ── Validation ────────────────────────────────────────────────────────────────
 
 function sanitize(str, maxLen = 2000) {
     if (typeof str !== "string") return "";
     return str.trim().slice(0, maxLen);
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 
+ * Wraps the Gemini generateContent call with exponential backoff retries 
+ * to gracefully handle 429 Rate Limit errors (common on free tier 15 RPM limits).
+ */
+async function generateWithRetry(options, maxRetries = 5) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            return await ai.models.generateContent(options);
+        } catch (err) {
+            const status = err?.status ?? err?.response?.status ?? 500;
+            if (status === 429 && attempt < maxRetries) {
+                // Free tier limits are often 15 requests per minute.
+                // We need longer delays to let the minute rollover.
+                // Delays: 5s, 10s, 20s, 30s, 60s
+                const delays = [5000, 10000, 20000, 30000, 60000];
+                const delay = delays[attempt] || 60000;
+                
+                console.log(`[LLM] Rate limit — retry ${attempt + 1}/${maxRetries} in ${delay / 1000}s`);
+                await sleep(delay);
+            } else {
+                const safe = new Error("Generation request failed due to API limits.");
+                safe.status = status;
+                throw safe;
+            }
+        }
+    }
 }
 
 // ── Error helpers ─────────────────────────────────────────────────────────────
@@ -138,7 +170,7 @@ app.post("/api/legal/ask", askLimiter, async (req, res) => {
         if (isCasualChat(question)) {
             console.log("[ASK] Detected casual chat — skipping Qdrant.");
 
-            const chatResponse = await ai.models.generateContent({
+            const chatResponse = await generateWithRetry({
                 model:  "gemini-2.5-flash-lite",
                 config: {
                     systemInstruction,
@@ -179,7 +211,7 @@ app.post("/api/legal/ask", askLimiter, async (req, res) => {
             : `No matching legal context was found in the indexed database for this query.\n\nUser Question: ${question}`;
 
         console.log("[ASK] Generating answer…");
-        const aiResponse = await ai.models.generateContent({
+        const aiResponse = await generateWithRetry({
             model:  "gemini-2.5-flash-lite",
             config: {
                 systemInstruction,

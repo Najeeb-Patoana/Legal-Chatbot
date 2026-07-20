@@ -6,6 +6,11 @@
  * Fetches recent judicial opinions from the CourtListener REST API,
  * chunks long texts, embeds each chunk, and upserts deterministic
  * points into the Qdrant legal knowledge collection.
+ *
+ * REQUIRES: A free CourtListener API token.
+ *   1. Register at https://www.courtlistener.com/
+ *   2. Go to Profile → API → Generate Token
+ *   3. Add to .env: COURTLISTENER_TOKEN=your-token-here
  */
 require("dotenv").config({ path: require("path").resolve(__dirname, "../.env") });
 
@@ -17,10 +22,35 @@ const { generateDeterministicUUID }        = require("../helpers/cryptoUtils");
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const CL_BASE     = process.env.COURTLISTENER_API_URL || "https://www.courtlistener.com/api/rest/v3";
+const CL_TOKEN    = process.env.COURTLISTENER_TOKEN;
 const BATCH_SIZE  = 10;
-const EMBED_DELAY = 300;
+const EMBED_DELAY = 350;
+
+if (!CL_TOKEN) {
+    console.error("════════════════════════════════════════════════════════════");
+    console.error("  ERROR: COURTLISTENER_TOKEN is not set in .env");
+    console.error("");
+    console.error("  CourtListener requires a free API token:");
+    console.error("    1. Register at https://www.courtlistener.com/sign-in/register/");
+    console.error("    2. Go to Profile → API Keys");
+    console.error("    3. Generate a token and add to your .env file:");
+    console.error("       COURTLISTENER_TOKEN=your-token-here");
+    console.error("════════════════════════════════════════════════════════════");
+    process.exit(1);
+}
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+// ── Axios instance with auth ──────────────────────────────────────────────────
+
+const clApi = axios.create({
+    baseURL: CL_BASE,
+    timeout: 30000,
+    headers: {
+        "Authorization": `Token ${CL_TOKEN}`,
+        "User-Agent":    "LegalKnowledgeBot/1.0",
+    },
+});
 
 // ── HTML stripping ────────────────────────────────────────────────────────────
 
@@ -33,6 +63,7 @@ function stripHtml(html) {
     return html
         .replace(/<br\s*\/?>/gi, "\n")
         .replace(/<\/p>/gi, "\n\n")
+        .replace(/<\/h[1-6]>/gi, "\n\n")
         .replace(/<[^>]+>/g, "")
         .replace(/&amp;/g, "&")
         .replace(/&lt;/g, "<")
@@ -50,14 +81,10 @@ function stripHtml(html) {
  * Fetch a page of recent opinions from CourtListener.
  */
 async function fetchOpinions(page = 1) {
-    const url = `${CL_BASE}/opinions/?format=json&order_by=-date_created&page_size=20&page=${page}`;
+    const url = `/opinions/?format=json&order_by=-date_created&page_size=20&page=${page}`;
     console.log(`[CourtListener] Fetching opinions page ${page}…`);
 
-    const { data } = await axios.get(url, {
-        timeout: 30000,
-        headers: { "User-Agent": "LegalKnowledgeBot/1.0" },
-    });
-
+    const { data } = await clApi.get(url);
     return data.results || [];
 }
 
@@ -67,11 +94,16 @@ async function processOpinion(opinion) {
     const opinionId  = opinion.id;
     const dateFiled  = opinion.date_created?.split("T")[0] || "unknown";
     const caseName   = opinion.case_name || opinion.slug || `opinion-${opinionId}`;
-    const citation   = opinion.citation?.length > 0
-        ? opinion.citation.map((c) => c.cite || c).join("; ")
-        : `CourtListener Opinion #${opinionId}`;
 
-    // Get text: prefer plain_text, fall back to html_lawbox
+    // Build citation string
+    let citation = `CourtListener Opinion #${opinionId}`;
+    if (opinion.citation && Array.isArray(opinion.citation) && opinion.citation.length > 0) {
+        citation = opinion.citation.map((c) => (typeof c === "string" ? c : c.cite || c)).join("; ");
+    } else if (opinion.cluster_id) {
+        citation = `Cluster #${opinion.cluster_id} — ${caseName}`;
+    }
+
+    // Get text: prefer plain_text, fall back to various HTML fields
     let text = "";
     if (opinion.plain_text && opinion.plain_text.trim().length > 100) {
         text = opinion.plain_text.trim();
@@ -86,13 +118,13 @@ async function processOpinion(opinion) {
     }
 
     if (text.length < 100) {
-        console.log(`[CourtListener] Opinion ${opinionId} has insufficient text, skipping.`);
+        console.log(`[CourtListener] Opinion ${opinionId} has insufficient text (${text.length} chars), skipping.`);
         return [];
     }
 
     // Chunk the opinion text
     const chunks = chunkText(text);
-    console.log(`[CourtListener] Opinion ${opinionId} → ${chunks.length} chunk(s)`);
+    console.log(`[CourtListener] Opinion ${opinionId} (${caseName.substring(0, 40)}) → ${chunks.length} chunk(s)`);
 
     const points = [];
 
@@ -138,13 +170,13 @@ async function main() {
 
     const allPoints = [];
 
-    // Fetch 2 pages of opinions (40 total, process up to 10)
+    // Fetch 2 pages of opinions (up to 40), process 5 per page
     for (let page = 1; page <= 2; page++) {
         try {
             const opinions = await fetchOpinions(page);
             console.log(`[CourtListener] Page ${page}: ${opinions.length} opinion(s)`);
 
-            for (const opinion of opinions.slice(0, 5)) { // 5 per page
+            for (const opinion of opinions.slice(0, 5)) {
                 try {
                     const points = await processOpinion(opinion);
                     allPoints.push(...points);

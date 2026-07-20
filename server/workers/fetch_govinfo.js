@@ -3,36 +3,83 @@
  * ────────────────────────────────
  * Standalone script: `node workers/fetch_govinfo.js`
  *
- * Pulls recent US Code packages from the GovInfo API, downloads their
- * USLM XML, breaks each document into <section> nodes, embeds the text,
- * and upserts deterministic points into Qdrant.
+ * Pulls US Code section granules from the GovInfo API, downloads their
+ * HTML content, cleans the text, embeds it, and upserts deterministic
+ * points into Qdrant.
  */
 require("dotenv").config({ path: require("path").resolve(__dirname, "../.env") });
 
 const axios                                = require("axios");
-const { DOMParser }                        = require("@xmldom/xmldom");
-const xpath                                = require("xpath");
 const { createEmbedding }                  = require("../helpers/embedding");
-const { extractNodeText }                  = require("../helpers/chunking");
 const { initializeQdrant, storeChunks }    = require("../helpers/qdrant");
 const { generateDeterministicUUID }        = require("../helpers/cryptoUtils");
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const GOVINFO_BASE  = "https://api.govinfo.gov";
 const API_KEY       = process.env.GOVINFO_API_KEY;
-const BATCH_SIZE    = 10;          // points per upsert call
-const EMBED_DELAY   = 300;         // ms between embedding calls (rate-limit safety)
+const BATCH_SIZE    = 10;
+const EMBED_DELAY   = 350;         // ms between embedding calls (rate-limit safety)
+
+if (!API_KEY) {
+    console.error("[GovInfo] GOVINFO_API_KEY is not set in .env — aborting.");
+    process.exit(1);
+}
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+// ── HTML stripping ────────────────────────────────────────────────────────────
+
+/**
+ * Strip HTML tags and clean whitespace from GovInfo HTML content.
+ */
+function stripHtml(html) {
+    if (!html) return "";
+    return html
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<\/p>/gi, "\n\n")
+        .replace(/<\/h[1-6]>/gi, "\n\n")
+        .replace(/<\/li>/gi, "\n")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&nbsp;/g, " ")
+        .replace(/&sect;/g, "§")
+        .replace(/\n{3,}/g, "\n\n")
+        .replace(/[ \t]+/g, " ")
+        .trim();
+}
+
+/**
+ * Extract citation path from HTML comments like:
+ * <!-- expcite:TITLE 50-WAR AND NATIONAL DEFENSE!@!CHAPTER 1-...!@!Sec. 1 -->
+ * <!-- itempath:/500/CHAPTER 1/Sec. 1 -->
+ */
+function extractCitation(html, granuleId) {
+    // Try expcite comment first
+    const expciteMatch = html.match(/<!--\s*expcite:(.+?)-->/);
+    if (expciteMatch) {
+        return expciteMatch[1].replace(/!@!/g, " > ").trim();
+    }
+
+    // Try itempath comment
+    const itempathMatch = html.match(/<!--\s*itempath:(.+?)-->/);
+    if (itempathMatch) {
+        return itempathMatch[1].trim();
+    }
+
+    // Fallback to granuleId
+    return granuleId;
+}
 
 // ── Fetch package list ────────────────────────────────────────────────────────
 
 /**
  * Fetch recent USCODE packages from GovInfo collections endpoint.
- * Returns an array of { packageId, title, dateIssued, packageLink }.
  */
 async function fetchUSCodePackages() {
-    // Fetch from the last 12 months to get a meaningful dataset
     const startDate = new Date();
     startDate.setFullYear(startDate.getFullYear() - 1);
     const startStr = startDate.toISOString().split("T")[0] + "T00:00:00Z";
@@ -46,131 +93,81 @@ async function fetchUSCodePackages() {
     return packages;
 }
 
-// ── Fetch & parse a single package ────────────────────────────────────────────
+// ── Fetch granules for a package ──────────────────────────────────────────────
 
 /**
- * Given a GovInfo package summary link, fetch its details to find the
- * USLM XML download URL, then download and parse the XML.
+ * Fetch LEAF granules (actual statute sections) from a package.
+ * Skips TOC, FRONTMATTER, and TOPPARENT granules.
  */
-async function fetchAndParsePackage(pkg) {
-    const packageId = pkg.packageId;
-    console.log(`\n[GovInfo] Processing package: ${packageId}`);
+async function fetchPackageGranules(packageId) {
+    const granules = [];
+    let url = `${GOVINFO_BASE}/packages/${packageId}/granules?offsetMark=*&pageSize=100&api_key=${API_KEY}`;
 
-    // 1. Get package summary to find download links
-    const summaryUrl = `${pkg.packageLink}?api_key=${API_KEY}`;
-    const { data: summary } = await axios.get(summaryUrl, { timeout: 30000 });
+    console.log(`[GovInfo] Fetching granules for ${packageId}…`);
 
-    // 2. Look for XML download — GovInfo provides multiple format links
-    //    Try the direct XML content URL or the 'xml' download link
-    let xmlUrl = null;
-
-    if (summary.download?.xmlLink) {
-        xmlUrl = summary.download.xmlLink + `?api_key=${API_KEY}`;
-    } else if (summary.download?.uslmLink) {
-        xmlUrl = summary.download.uslmLink + `?api_key=${API_KEY}`;
-    } else {
-        // Try the granules for more granular XML
-        console.log(`[GovInfo] No direct XML link for ${packageId}, trying granules…`);
-        return await fetchGranules(summary, packageId);
-    }
-
-    console.log(`[GovInfo] Downloading XML for ${packageId}…`);
-    const { data: xmlText } = await axios.get(xmlUrl, { timeout: 60000, responseType: "text" });
-
-    return parseSections(xmlText, packageId);
-}
-
-/**
- * Fetch individual granules (sections) from a package when no top-level XML is available.
- */
-async function fetchGranules(summary, packageId) {
-    const sections = [];
-    const granulesUrl = summary.granulesLink
-        ? `${summary.granulesLink}?pageSize=50&offsetMark=*&api_key=${API_KEY}`
-        : null;
-
-    if (!granulesUrl) {
-        console.log(`[GovInfo] No granules available for ${packageId}, skipping.`);
-        return sections;
-    }
-
-    const { data: granulesData } = await axios.get(granulesUrl, { timeout: 30000 });
-    const granules = granulesData.granules || [];
-    console.log(`[GovInfo] Found ${granules.length} granule(s) for ${packageId}.`);
-
-    for (const granule of granules.slice(0, 20)) { // Cap at 20 granules per package
+    // Paginate through all granules (cap at 3 pages = 300 granules per package)
+    for (let page = 0; page < 3; page++) {
         try {
-            const granuleDetail = `${granule.granuleLink}?api_key=${API_KEY}`;
-            const { data: gDetail } = await axios.get(granuleDetail, { timeout: 30000 });
+            const { data } = await axios.get(url, { timeout: 30000 });
+            const pageGranules = data.granules || [];
 
-            let gXmlUrl = null;
-            if (gDetail.download?.xmlLink) {
-                gXmlUrl = gDetail.download.xmlLink + `?api_key=${API_KEY}`;
-            }
+            // Only keep LEAF granules (actual section content)
+            const leafGranules = pageGranules.filter(
+                (g) => g.granuleClass === "LEAF"
+            );
+            granules.push(...leafGranules);
 
-            if (gXmlUrl) {
-                const { data: gXml } = await axios.get(gXmlUrl, { timeout: 60000, responseType: "text" });
-                const parsed = parseSections(gXml, packageId);
-                sections.push(...parsed);
+            console.log(`[GovInfo]   Page ${page + 1}: ${pageGranules.length} total, ${leafGranules.length} LEAF sections`);
+
+            // Check for next page
+            if (data.nextPage) {
+                url = data.nextPage + `&api_key=${API_KEY}`;
+                await sleep(300);
+            } else {
+                break;
             }
-            await sleep(200); // respect rate limits
         } catch (err) {
-            console.warn(`[GovInfo] Skipping granule ${granule.granuleId}: ${err.message?.split("\n")[0]}`);
+            console.warn(`[GovInfo]   Granule page error: ${err.message?.split("\n")[0]}`);
+            break;
         }
     }
 
-    return sections;
+    console.log(`[GovInfo]   Total LEAF granules: ${granules.length}`);
+    return granules;
 }
 
-// ── XML Parsing ───────────────────────────────────────────────────────────────
+// ── Download and parse a single granule ───────────────────────────────────────
 
 /**
- * Parse USLM XML and extract individual <section> nodes.
- * Each section yields: { identifier, heading, text }.
+ * Download the HTML content for a granule and extract clean text + citation.
  */
-function parseSections(xmlText, packageId) {
-    const sections = [];
+async function processGranule(granule, packageId) {
+    const granuleId = granule.granuleId;
+    const htmUrl = `${GOVINFO_BASE}/packages/${packageId}/granules/${granuleId}/htm?api_key=${API_KEY}`;
 
     try {
-        const doc = new DOMParser({
-            errorHandler: { warning: () => {}, error: () => {}, fatalError: () => {} },
-        }).parseFromString(xmlText, "text/xml");
+        const { data: html } = await axios.get(htmUrl, {
+            timeout: 30000,
+            responseType: "text",
+        });
 
-        // Use XPath to find all <section> elements (USLM namespace-agnostic)
-        const select = xpath.useNamespaces({});
-        let sectionNodes = select("//section", doc);
+        const citation = extractCitation(html, granuleId);
+        const cleanText = stripHtml(html);
 
-        // Also try with USLM namespace prefix
-        if (sectionNodes.length === 0) {
-            sectionNodes = select("//*[local-name()='section']", doc);
+        if (cleanText.length < 80) {
+            return null; // Skip trivially short sections
         }
 
-        console.log(`[GovInfo] Found ${sectionNodes.length} <section> node(s) in ${packageId}.`);
-
-        for (const node of sectionNodes) {
-            // Extract @identifier (e.g., /us/usc/t17/s107)
-            const identifier = node.getAttribute("identifier") || node.getAttribute("id") || "";
-
-            // Extract heading text
-            const headingNodes = xpath.select("*[local-name()='heading']", node);
-            const heading = headingNodes.length > 0 ? extractNodeText(headingNodes[0]) : "";
-
-            // Extract full text content
-            const fullText = extractNodeText(node);
-
-            if (fullText.length < 50) continue; // skip trivially short sections
-
-            sections.push({
-                identifier: identifier || `${packageId}-section-${sections.length}`,
-                heading,
-                text: fullText,
-            });
-        }
+        return {
+            granuleId,
+            title:    granule.title || "",
+            citation,
+            text:     cleanText,
+        };
     } catch (err) {
-        console.error(`[GovInfo] XML parse error for ${packageId}: ${err.message?.split("\n")[0]}`);
+        console.warn(`[GovInfo]   Granule ${granuleId}: ${err.message?.split("\n")[0]}`);
+        return null;
     }
-
-    return sections;
 }
 
 // ── Embed & Store ─────────────────────────────────────────────────────────────
@@ -187,22 +184,23 @@ async function embedAndStore(sections) {
 
     for (let i = 0; i < sections.length; i++) {
         const sec = sections[i];
-        const textForEmbedding = sec.heading
-            ? `${sec.heading}\n\n${sec.text}`
+        const textForEmbedding = sec.title
+            ? `${sec.title}\n\n${sec.text}`
             : sec.text;
 
         try {
-            console.log(`[GovInfo] Embedding ${i + 1}/${sections.length}: ${sec.identifier}`);
+            console.log(`[GovInfo] Embedding ${i + 1}/${sections.length}: ${sec.citation.substring(0, 60)}…`);
             const vector = await createEmbedding(textForEmbedding);
 
             batch.push({
-                id:      generateDeterministicUUID(`govinfo-${sec.identifier}`),
+                id:      generateDeterministicUUID(`govinfo-${sec.granuleId}`),
                 vector,
                 payload: {
                     text:         textForEmbedding,
                     documentType: "Federal Statute (US Code)",
-                    citation:     sec.identifier,
-                    heading:      sec.heading,
+                    citation:     sec.citation,
+                    heading:      sec.title,
+                    granuleId:    sec.granuleId,
                     source:       "GovInfo USCODE",
                 },
             });
@@ -216,7 +214,7 @@ async function embedAndStore(sections) {
 
             await sleep(EMBED_DELAY);
         } catch (err) {
-            console.warn(`[GovInfo] Skipping section ${sec.identifier}: ${err.message?.split("\n")[0]}`);
+            console.warn(`[GovInfo] Embed error for ${sec.granuleId}: ${err.message?.split("\n")[0]}`);
         }
     }
 
@@ -246,13 +244,27 @@ async function main() {
 
     const allSections = [];
 
-    for (const pkg of packages.slice(0, 5)) { // Process up to 5 packages per run
+    // Process up to 3 packages per run
+    for (const pkg of packages.slice(0, 3)) {
+        const packageId = pkg.packageId;
+        console.log(`\n[GovInfo] ── Processing: ${packageId} ──`);
+
         try {
-            const sections = await fetchAndParsePackage(pkg);
-            allSections.push(...sections);
-            await sleep(500);
+            const granules = await fetchPackageGranules(packageId);
+
+            // Process up to 15 granules per package to stay within rate limits
+            const toProcess = granules.slice(0, 15);
+            console.log(`[GovInfo] Processing ${toProcess.length} granule(s) from ${packageId}…`);
+
+            for (const granule of toProcess) {
+                const section = await processGranule(granule, packageId);
+                if (section) {
+                    allSections.push(section);
+                }
+                await sleep(250); // respect rate limits
+            }
         } catch (err) {
-            console.warn(`[GovInfo] Package error: ${err.message?.split("\n")[0]}`);
+            console.warn(`[GovInfo] Package ${packageId} error: ${err.message?.split("\n")[0]}`);
         }
     }
 
