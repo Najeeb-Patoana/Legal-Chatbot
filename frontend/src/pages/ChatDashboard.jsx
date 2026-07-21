@@ -3,15 +3,6 @@ import { FiSend, FiAlertTriangle, FiShield, FiUser, FiCopy, FiCheck, FiBookOpen,
 import { askLegalQuestion } from '../services/api.js'
 import styles from './ChatDashboard.module.css'
 
-/**
- * ChatDashboard — ChatGPT-style interface for the US Legal Knowledge Base.
- *
- * - User messages aligned right (teal bubbles)
- * - Bot messages aligned left (light surface bubbles)
- * - Permanent legal disclaimer banner
- * - Auto-scroll, typing indicator, copy-to-clipboard
- * - Rich empty state with suggestion cards
- */
 export default function ChatDashboard() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
@@ -143,19 +134,7 @@ export default function ChatDashboard() {
 
   return (
     <div className={styles.container}>
-      {/* ── Disclaimer Banner ── */}
-      <div className={styles.banner} role="alert" id="legal-disclaimer-banner">
-        <div className={styles.bannerInner}>
-          <FiAlertTriangle size={15} className={styles.bannerIcon} />
-          <p className={styles.bannerText}>
-            <strong>Legal Information Only</strong> — This tool provides general legal information
-            from indexed federal statutes and judicial opinions. It is <strong>not</strong> legal
-            advice and does not create an attorney-client relationship.
-          </p>
-        </div>
-      </div>
-
-      {/* ── Messages ── */}
+          {/* ── Messages ── */}
       <div className={styles.messages} id="chat-messages-area">
         {messages.length === 0 ? (
           <div className={styles.empty}>
