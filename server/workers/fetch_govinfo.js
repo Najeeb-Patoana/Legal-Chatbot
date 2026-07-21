@@ -4,8 +4,8 @@
  * Standalone script: `node workers/fetch_govinfo.js`
  *
  * Pulls US Code section granules from the GovInfo API, downloads their
- * HTML content, cleans the text, chunks it, embeds it, and upserts deterministic
- * points into Qdrant.
+ * HTML content, cleans the text, chunks it, embeds it LOCALLY (no API limits), 
+ * and upserts deterministic points into Qdrant.
  */
 require("dotenv").config({ path: require("path").resolve(__dirname, "../.env") });
 
@@ -18,14 +18,15 @@ const { generateDeterministicUUID }        = require("../helpers/cryptoUtils");
 // ── Config ────────────────────────────────────────────────────────────────────
 const GOVINFO_BASE  = "https://api.govinfo.gov";
 const API_KEY       = process.env.GOVINFO_API_KEY;
-const BATCH_SIZE    = 15;
-const EMBED_DELAY   = 350;         // ms between embedding calls (rate-limit safety)
+const BATCH_SIZE    = 100; // Increased to 100: Qdrant handles large batches easily
 
 if (!API_KEY) {
-    console.error("[GovInfo] GOVINFO_API_KEY is not set in .env — aborting.");
+    console.error("════════════════════════════════════════════════════════════");
+    console.error("  ERROR: GOVINFO_API_KEY is not set in .env");
     process.exit(1);
 }
 
+// Helper to avoid rate-limiting from the GovInfo web API (NOT for embeddings)
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 // ── HTML stripping ────────────────────────────────────────────────────────────
@@ -67,7 +68,7 @@ function extractCitation(html, granuleId) {
 async function fetchUSCodePackages() {
     let packages = [];
     const startDate = new Date();
-    startDate.setFullYear(startDate.getFullYear() - 1); // Get last 1 year of USCODE packages for this demo, or all if we configure it
+    startDate.setFullYear(startDate.getFullYear() - 1); // Get last 1 year of USCODE packages
     const startStr = startDate.toISOString().split("T")[0] + "T00:00:00Z";
 
     let url = `${GOVINFO_BASE}/collections/USCODE/${startStr}?pageSize=100&offsetMark=*&api_key=${API_KEY}`;
@@ -188,7 +189,7 @@ async function embedAndStore(sections) {
         }
     }
 
-    console.log(`[GovInfo] Total chunks to embed: ${allChunks.length}`);
+    console.log(`[GovInfo] Total chunks to embed locally: ${allChunks.length}`);
 
     let batch = [];
     let stored = 0;
@@ -199,9 +200,9 @@ async function embedAndStore(sections) {
         const sec = item.section;
 
         try {
-            if (i % 10 === 0 && i > 0) {
+            if (i % 500 === 0 && i > 0) {
                 const elapsed = Date.now() - startTime;
-                const rate = i / elapsed; // chunks per ms
+                const rate = elapsed > 0 ? i / elapsed : 1; // chunks per ms
                 const remaining = (allChunks.length - i) / rate;
                 const etaMins = (remaining / 60000).toFixed(1);
                 console.log(`[GovInfo] Progress: ${i}/${allChunks.length} chunks. ETA: ${etaMins} mins…`);
@@ -228,11 +229,10 @@ async function embedAndStore(sections) {
             if (batch.length >= BATCH_SIZE) {
                 await storeChunks(batch);
                 stored += batch.length;
-                console.log(`[GovInfo] Stored batch (${stored} chunks total).`);
                 batch = [];
             }
-
-            await sleep(EMBED_DELAY);
+            
+            // NO SLEEP NEEDED HERE: Local embedding is instant!
         } catch (err) {
             console.warn(`[GovInfo] Embed error for ${sec.granuleId} chunk ${item.chunkIndex}: ${err.message}`);
         }
@@ -243,7 +243,7 @@ async function embedAndStore(sections) {
         stored += batch.length;
     }
 
-    console.log(`\n[GovInfo] ✓ Ingestion complete — ${stored} chunk(s) stored.`);
+    console.log(`\n[GovInfo] ✓ Ingestion complete — ${stored} chunk(s) stored in Qdrant.`);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -278,7 +278,7 @@ async function main() {
                 if (section) {
                     allSections.push(section);
                 }
-                await sleep(150); // respect rate limits
+                await sleep(150); // Respect GovInfo web API rate limits
             }
         } catch (err) {
             console.warn(`[GovInfo] Package ${packageId} error: ${err.message}`);

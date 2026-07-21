@@ -4,8 +4,8 @@
  * Standalone script: `node workers/fetch_court.js`
  *
  * Fetches recent judicial opinions from the CourtListener REST API,
- * chunks long texts, embeds each chunk, and upserts deterministic
- * points into the Qdrant legal knowledge collection.
+ * chunks long texts, embeds each chunk LOCALLY (no API limits), 
+ * and upserts deterministic points into the Qdrant legal knowledge collection.
  */
 require("dotenv").config({ path: require("path").resolve(__dirname, "../.env") });
 
@@ -18,8 +18,7 @@ const { generateDeterministicUUID }        = require("../helpers/cryptoUtils");
 // ── Config ────────────────────────────────────────────────────────────────────
 const CL_BASE     = process.env.COURTLISTENER_API_URL || "https://www.courtlistener.com/api/rest/v3";
 const CL_TOKEN    = process.env.COURTLISTENER_TOKEN;
-const BATCH_SIZE  = 15;
-const EMBED_DELAY = 350;
+const BATCH_SIZE  = 100; // Increased to 100: Qdrant handles large batches easily
 const MAX_PAGES   = parseInt(process.env.COURTLISTENER_MAX_PAGES, 10) || 50;
 
 if (!CL_TOKEN) {
@@ -28,6 +27,7 @@ if (!CL_TOKEN) {
     process.exit(1);
 }
 
+// Helper to avoid rate-limiting from the CourtListener API (NOT for embeddings)
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 const clApi = axios.create({
@@ -58,7 +58,7 @@ function stripHtml(html) {
 
 async function fetchOpinions(page = 1) {
     const url = `/opinions/?format=json&order_by=-date_created&page_size=20&page=${page}`;
-    console.log(`[CourtListener] Fetching opinions page ${page}/${MAX_PAGES}…`);
+    console.log(`[CourtListener] Downloading opinions page ${page}/${MAX_PAGES}…`);
     const { data } = await clApi.get(url);
     return data.results || [];
 }
@@ -119,7 +119,7 @@ async function processOpinion(opinion) {
                     source:       "CourtListener",
                 },
             });
-            await sleep(EMBED_DELAY);
+            // NO SLEEP NEEDED HERE: Local embedding is instant and has no rate limits!
         } catch (err) {
             console.warn(`[CourtListener] Embed error for opinion ${opinionId} chunk ${i}: ${err.message}`);
         }
@@ -141,7 +141,7 @@ async function main() {
             const opinions = await fetchOpinions(page);
             if (opinions.length === 0) break;
             
-            console.log(`[CourtListener] Page ${page}: Processing ${opinions.length} opinion(s)`);
+            console.log(`[CourtListener] Processing ${opinions.length} opinion(s) locally...`);
             let pagePoints = [];
 
             for (const opinion of opinions) {
@@ -158,10 +158,12 @@ async function main() {
                     const batch = pagePoints.slice(i, i + BATCH_SIZE);
                     await storeChunks(batch);
                     totalStored += batch.length;
-                    console.log(`[CourtListener] Stored batch (Total: ${totalStored} chunks)`);
+                    console.log(`[CourtListener] Stored batch (Total Qdrant points: ${totalStored})`);
                 }
             }
-            await sleep(1000);
+            
+            // Brief sleep between API page requests to respect CourtListener's servers
+            await sleep(1000); 
         } catch (err) {
             console.warn(`[CourtListener] Page ${page} error: ${err.message}`);
             break;

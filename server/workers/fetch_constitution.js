@@ -1,11 +1,3 @@
-/**
- * US Constitution & Amendments Ingestion Worker
- * ─────────────────────────────────────────────
- * Standalone script: `node workers/fetch_constitution.js`
- *
- * Downloads the US Constitution, Bill of Rights, and Amendments
- * using the GovInfo CDOC-110hdoc50 package.
- */
 require("dotenv").config({ path: require("path").resolve(__dirname, "../.env") });
 
 const axios                                = require("axios");
@@ -16,8 +8,7 @@ const { generateDeterministicUUID }        = require("../helpers/cryptoUtils");
 
 const GOVINFO_BASE  = "https://api.govinfo.gov";
 const API_KEY       = process.env.GOVINFO_API_KEY;
-const BATCH_SIZE    = 15;
-const EMBED_DELAY   = 350;
+const BATCH_SIZE    = 100; // Increased to 100: Qdrant handles large batches easily
 const CONSTITUTION_PACKAGE_ID = "CDOC-110hdoc50";
 
 if (!API_KEY) {
@@ -25,6 +16,7 @@ if (!API_KEY) {
     process.exit(1);
 }
 
+// Helper to avoid rate-limiting from the GovInfo web API (NOT for embeddings)
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 function stripHtml(html) {
@@ -112,16 +104,26 @@ async function embedAndStore(sections) {
         }
     }
 
-    console.log(`[Constitution] Total constitutional chunks to embed: ${allChunks.length}`);
+    console.log(`[Constitution] Total constitutional chunks to embed locally: ${allChunks.length}`);
 
     let batch = [];
     let stored = 0;
+    const startTime = Date.now();
 
     for (let i = 0; i < allChunks.length; i++) {
         const item = allChunks[i];
         const sec = item.section;
 
         try {
+            // Add a progress logger for visibility
+            if (i % 50 === 0 && i > 0) {
+                const elapsed = Date.now() - startTime;
+                const rate = elapsed > 0 ? i / elapsed : 1;
+                const remaining = (allChunks.length - i) / rate;
+                const etaSecs = (remaining / 1000).toFixed(1);
+                console.log(`[Constitution] Progress: ${i}/${allChunks.length} chunks. ETA: ${etaSecs} seconds…`);
+            }
+
             const vector = await createEmbedding(item.text);
 
             batch.push({
@@ -145,8 +147,8 @@ async function embedAndStore(sections) {
                 console.log(`[Constitution] Stored batch (${stored} chunks total).`);
                 batch = [];
             }
-
-            await sleep(EMBED_DELAY);
+            
+            // NO SLEEP NEEDED HERE: Local embedding is instant!
         } catch (err) {
             console.warn(`[Constitution] Embed error for chunk ${i}: ${err.message}`);
         }
@@ -179,7 +181,7 @@ async function main() {
     for (const granule of granules) {
         const section = await processGranule(granule);
         if (section) sections.push(section);
-        await sleep(150);
+        await sleep(150); // Respect GovInfo web API rate limits
     }
 
     await embedAndStore(sections);
