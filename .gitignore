@@ -1,6 +1,6 @@
 # Dependencies
 **/node_modules/
-
+govinfo_progress.json
 # Environment files — NEVER commit API keys
 **/.env
 **/.env.*
