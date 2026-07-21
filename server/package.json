@@ -22,6 +22,7 @@
   "description": "US Legal Knowledge Base — AI-powered legal information assistant using RAG",
   "dependencies": {
     "@google/genai": "^2.10.0",
+    "@huggingface/transformers": "^4.2.0",
     "@qdrant/js-client-rest": "^1.18.0",
     "@xmldom/xmldom": "^0.9.8",
     "axios": "^1.18.1",

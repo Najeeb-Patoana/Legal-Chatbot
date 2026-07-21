@@ -6,20 +6,15 @@ const qdrant = new QdrantClient({
     checkCompatibility: false,
 });
 
-const COLLECTION = "us-legal-knowledge";
+// Changed to -v2 so it creates a fresh database with the new 384 dimensions
+const COLLECTION = "us-legal-knowledge-v2";
 
-// ── Initialization ────────────────────────────────────────────────────────────
-
-/**
- * Ensure the legal knowledge collection exists.
- * Called once at server startup and by each worker before ingestion.
- * Safe to call multiple times — skips creation if the collection is already present.
- */
 async function initializeQdrant() {
     const collections = await qdrant.getCollections();
     if (!collections.collections.some((c) => c.name === COLLECTION)) {
         await qdrant.createCollection(COLLECTION, {
-            vectors: { size: 3072, distance: "Cosine" },
+            // CRITICAL: Updated to 384 to match the local MiniLM model
+            vectors: { size: 384, distance: "Cosine" },
         });
         console.log(`[Qdrant] Created collection '${COLLECTION}'.`);
     } else {
@@ -30,11 +25,7 @@ async function initializeQdrant() {
 // ── Store ─────────────────────────────────────────────────────────────────────
 
 /**
- * Upsert pre-built vector points into the collection.
- * Each element in `chunkPoints` must have: { id, vector, payload }.
- * Workers are responsible for building their own payloads with
- * documentType, citation, text, and any extra metadata fields.
- *
+
  * @param {Array<{id: string, vector: number[], payload: object}>} chunkPoints
  */
 async function storeChunks(chunkPoints) {
@@ -44,11 +35,9 @@ async function storeChunks(chunkPoints) {
 // ── Search ────────────────────────────────────────────────────────────────────
 
 /**
- * Global (unfiltered) semantic search across the entire legal knowledge base.
- * Returns the top-k payload objects — the caller never sees raw scores.
  *
  * @param {number[]} queryVector  Embedding of the user's question
- * @param {number}   [limit=5]    Max results to return
+ * @param {number}   [limit=15]   Max results to return
  * @returns {Promise<object[]>}   Array of payload objects
  */
 async function searchGlobalLegalContext(queryVector, limit = 15) {
