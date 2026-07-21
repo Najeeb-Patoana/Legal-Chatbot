@@ -4,20 +4,21 @@
  * Standalone script: `node workers/fetch_govinfo.js`
  *
  * Pulls US Code section granules from the GovInfo API, downloads their
- * HTML content, cleans the text, embeds it, and upserts deterministic
+ * HTML content, cleans the text, chunks it, embeds it, and upserts deterministic
  * points into Qdrant.
  */
 require("dotenv").config({ path: require("path").resolve(__dirname, "../.env") });
 
 const axios                                = require("axios");
 const { createEmbedding }                  = require("../helpers/embedding");
+const { chunkText }                        = require("../helpers/chunking");
 const { initializeQdrant, storeChunks }    = require("../helpers/qdrant");
 const { generateDeterministicUUID }        = require("../helpers/cryptoUtils");
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const GOVINFO_BASE  = "https://api.govinfo.gov";
 const API_KEY       = process.env.GOVINFO_API_KEY;
-const BATCH_SIZE    = 10;
+const BATCH_SIZE    = 15;
 const EMBED_DELAY   = 350;         // ms between embedding calls (rate-limit safety)
 
 if (!API_KEY) {
@@ -29,9 +30,6 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 // ── HTML stripping ────────────────────────────────────────────────────────────
 
-/**
- * Strip HTML tags and clean whitespace from GovInfo HTML content.
- */
 function stripHtml(html) {
     if (!html) return "";
     return html
@@ -52,95 +50,88 @@ function stripHtml(html) {
         .trim();
 }
 
-/**
- * Extract citation path from HTML comments like:
- * <!-- expcite:TITLE 50-WAR AND NATIONAL DEFENSE!@!CHAPTER 1-...!@!Sec. 1 -->
- * <!-- itempath:/500/CHAPTER 1/Sec. 1 -->
- */
 function extractCitation(html, granuleId) {
-    // Try expcite comment first
     const expciteMatch = html.match(/<!--\s*expcite:(.+?)-->/);
     if (expciteMatch) {
         return expciteMatch[1].replace(/!@!/g, " > ").trim();
     }
-
-    // Try itempath comment
     const itempathMatch = html.match(/<!--\s*itempath:(.+?)-->/);
     if (itempathMatch) {
         return itempathMatch[1].trim();
     }
-
-    // Fallback to granuleId
     return granuleId;
 }
 
 // ── Fetch package list ────────────────────────────────────────────────────────
 
-/**
- * Fetch recent USCODE packages from GovInfo collections endpoint.
- */
 async function fetchUSCodePackages() {
+    let packages = [];
     const startDate = new Date();
-    startDate.setFullYear(startDate.getFullYear() - 1);
+    startDate.setFullYear(startDate.getFullYear() - 1); // Get last 1 year of USCODE packages for this demo, or all if we configure it
     const startStr = startDate.toISOString().split("T")[0] + "T00:00:00Z";
 
-    const url = `${GOVINFO_BASE}/collections/USCODE/${startStr}?pageSize=25&offsetMark=*&api_key=${API_KEY}`;
+    let url = `${GOVINFO_BASE}/collections/USCODE/${startStr}?pageSize=100&offsetMark=*&api_key=${API_KEY}`;
     console.log("[GovInfo] Fetching USCODE package list…");
 
-    const { data } = await axios.get(url, { timeout: 30000 });
-    const packages = data.packages || [];
-    console.log(`[GovInfo] Found ${packages.length} package(s).`);
+    while (url) {
+        try {
+            const { data } = await axios.get(url, { timeout: 30000 });
+            if (data.packages) {
+                packages.push(...data.packages);
+            }
+            if (data.nextPage) {
+                url = data.nextPage + `&api_key=${API_KEY}`;
+                await sleep(300);
+            } else {
+                url = null;
+            }
+        } catch (err) {
+            console.warn(`[GovInfo] Error fetching packages: ${err.message}`);
+            break; // Stop paginating packages on error, but keep what we have
+        }
+    }
+
+    console.log(`[GovInfo] Found ${packages.length} package(s) total.`);
     return packages;
 }
 
 // ── Fetch granules for a package ──────────────────────────────────────────────
 
-/**
- * Fetch LEAF granules (actual statute sections) from a package.
- * Skips TOC, FRONTMATTER, and TOPPARENT granules.
- */
 async function fetchPackageGranules(packageId) {
     const granules = [];
     let url = `${GOVINFO_BASE}/packages/${packageId}/granules?offsetMark=*&pageSize=100&api_key=${API_KEY}`;
 
     console.log(`[GovInfo] Fetching granules for ${packageId}…`);
+    let page = 1;
 
-    // Paginate through all granules (cap at 3 pages = 300 granules per package)
-    for (let page = 0; page < 3; page++) {
+    while (url) {
         try {
             const { data } = await axios.get(url, { timeout: 30000 });
             const pageGranules = data.granules || [];
-
+            
             // Only keep LEAF granules (actual section content)
-            const leafGranules = pageGranules.filter(
-                (g) => g.granuleClass === "LEAF"
-            );
+            const leafGranules = pageGranules.filter(g => g.granuleClass === "LEAF");
             granules.push(...leafGranules);
 
-            console.log(`[GovInfo]   Page ${page + 1}: ${pageGranules.length} total, ${leafGranules.length} LEAF sections`);
-
-            // Check for next page
             if (data.nextPage) {
                 url = data.nextPage + `&api_key=${API_KEY}`;
-                await sleep(300);
+                page++;
+                await sleep(250);
             } else {
-                break;
+                url = null;
             }
         } catch (err) {
-            console.warn(`[GovInfo]   Granule page error: ${err.message?.split("\n")[0]}`);
+            console.warn(`[GovInfo] Granule page ${page} error: ${err.message}`);
             break;
         }
     }
 
-    console.log(`[GovInfo]   Total LEAF granules: ${granules.length}`);
+    console.log(`[GovInfo] Total LEAF granules for ${packageId}: ${granules.length}`);
     return granules;
 }
 
 // ── Download and parse a single granule ───────────────────────────────────────
 
-/**
- * Download the HTML content for a granule and extract clean text + citation.
- */
 async function processGranule(granule, packageId) {
     const granuleId = granule.granuleId;
     const htmUrl = `${GOVINFO_BASE}/packages/${packageId}/granules/${granuleId}/htm?api_key=${API_KEY}`;
@@ -155,17 +146,18 @@ async function processGranule(granule, packageId) {
         const cleanText = stripHtml(html);
 
         if (cleanText.length < 80) {
-            return null; // Skip trivially short sections
+            return null;
         }
 
         return {
             granuleId,
+            packageId,
             title:    granule.title || "",
             citation,
             text:     cleanText,
         };
     } catch (err) {
-        console.warn(`[GovInfo]   Granule ${granuleId}: ${err.message?.split("\n")[0]}`);
+        console.warn(`[GovInfo] Granule ${granuleId} download error: ${err.message}`);
         return null;
     }
 }
@@ -178,29 +170,57 @@ async function embedAndStore(sections) {
         return;
     }
 
-    console.log(`\n[GovInfo] Embedding ${sections.length} section(s)…`);
+    console.log(`\n[GovInfo] Processing and chunking ${sections.length} section(s)…`);
+    let allChunks = [];
+
+    // First chunk all sections
+    for (const sec of sections) {
+        const textToChunk = sec.title ? `${sec.title}\n\n${sec.text}` : sec.text;
+        const chunks = chunkText(textToChunk);
+        
+        for (let i = 0; i < chunks.length; i++) {
+            allChunks.push({
+                section: sec,
+                text: chunks[i],
+                chunkIndex: i,
+                totalChunks: chunks.length
+            });
+        }
+    }
+
+    console.log(`[GovInfo] Total chunks to embed: ${allChunks.length}`);
+
     let batch = [];
     let stored = 0;
+    const startTime = Date.now();
 
-    for (let i = 0; i < sections.length; i++) {
-        const sec = sections[i];
-        const textForEmbedding = sec.title
-            ? `${sec.title}\n\n${sec.text}`
-            : sec.text;
+    for (let i = 0; i < allChunks.length; i++) {
+        const item = allChunks[i];
+        const sec = item.section;
 
         try {
-            console.log(`[GovInfo] Embedding ${i + 1}/${sections.length}: ${sec.citation.substring(0, 60)}…`);
-            const vector = await createEmbedding(textForEmbedding);
+            if (i % 10 === 0 && i > 0) {
+                const elapsed = Date.now() - startTime;
+                const rate = i / elapsed; // chunks per ms
+                const remaining = (allChunks.length - i) / rate;
+                const etaMins = (remaining / 60000).toFixed(1);
+                console.log(`[GovInfo] Progress: ${i}/${allChunks.length} chunks. ETA: ${etaMins} mins…`);
+            }
+
+            const vector = await createEmbedding(item.text);
 
             batch.push({
-                id:      generateDeterministicUUID(`govinfo-${sec.granuleId}`),
+                id: generateDeterministicUUID(`govinfo-${sec.granuleId}-chunk-${item.chunkIndex}`),
                 vector,
                 payload: {
-                    text:         textForEmbedding,
+                    text:         item.text,
                     documentType: "Federal Statute (US Code)",
                     citation:     sec.citation,
                     heading:      sec.title,
+                    packageId:    sec.packageId,
                     granuleId:    sec.granuleId,
+                    chunkIndex:   item.chunkIndex,
+                    totalChunks:  item.totalChunks,
                     source:       "GovInfo USCODE",
                 },
             });
@@ -208,23 +228,22 @@ async function embedAndStore(sections) {
             if (batch.length >= BATCH_SIZE) {
                 await storeChunks(batch);
                 stored += batch.length;
-                console.log(`[GovInfo] Stored batch (${stored} total).`);
+                console.log(`[GovInfo] Stored batch (${stored} chunks total).`);
                 batch = [];
             }
 
             await sleep(EMBED_DELAY);
         } catch (err) {
-            console.warn(`[GovInfo] Embed error for ${sec.granuleId}: ${err.message?.split("\n")[0]}`);
+            console.warn(`[GovInfo] Embed error for ${sec.granuleId} chunk ${item.chunkIndex}: ${err.message}`);
         }
     }
 
-    // Flush remaining
     if (batch.length > 0) {
         await storeChunks(batch);
         stored += batch.length;
     }
 
-    console.log(`\n[GovInfo] ✓ Ingestion complete — ${stored} section(s) stored.`);
+    console.log(`\n[GovInfo] ✓ Ingestion complete — ${stored} chunk(s) stored.`);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -244,27 +263,25 @@ async function main() {
 
     const allSections = [];
 
-    // Process up to 3 packages per run
-    for (const pkg of packages.slice(0, 3)) {
+    // Process all packages
+    for (let i = 0; i < packages.length; i++) {
+        const pkg = packages[i];
         const packageId = pkg.packageId;
-        console.log(`\n[GovInfo] ── Processing: ${packageId} ──`);
+        console.log(`\n[GovInfo] ── Processing Package ${i + 1}/${packages.length}: ${packageId} ──`);
 
         try {
             const granules = await fetchPackageGranules(packageId);
 
-            // Process up to 15 granules per package to stay within rate limits
-            const toProcess = granules.slice(0, 15);
-            console.log(`[GovInfo] Processing ${toProcess.length} granule(s) from ${packageId}…`);
-
-            for (const granule of toProcess) {
+            console.log(`[GovInfo] Downloading text for ${granules.length} granule(s)…`);
+            for (const granule of granules) {
                 const section = await processGranule(granule, packageId);
                 if (section) {
                     allSections.push(section);
                 }
-                await sleep(250); // respect rate limits
+                await sleep(150); // respect rate limits
             }
         } catch (err) {
-            console.warn(`[GovInfo] Package ${packageId} error: ${err.message?.split("\n")[0]}`);
+            console.warn(`[GovInfo] Package ${packageId} error: ${err.message}`);
         }
     }
 
@@ -273,6 +290,6 @@ async function main() {
 }
 
 main().catch((err) => {
-    console.error("[GovInfo] Fatal error:", err.message?.split("\n")[0]);
+    console.error("[GovInfo] Fatal error:", err.message);
     process.exit(1);
 });
