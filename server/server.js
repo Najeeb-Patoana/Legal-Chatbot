@@ -6,7 +6,8 @@ const helmet      = require("helmet");
 const rateLimit   = require("express-rate-limit");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const { ai, createEmbedding }              = require("./helpers/embedding");
+const { createEmbedding }              = require("./helpers/embedding");
+const { generate }                     = require("./helpers/llmManager");
 const { initializeQdrant,
         searchGlobalLegalContext }          = require("./helpers/qdrant");
 
@@ -63,33 +64,7 @@ function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** 
- * Wraps the Gemini generateContent call with exponential backoff retries 
- * to gracefully handle 429 Rate Limit errors (common on free tier 15 RPM limits).
- */
-async function generateWithRetry(options, maxRetries = 5) {
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        try {
-            return await ai.models.generateContent(options);
-        } catch (err) {
-            const status = err?.status ?? err?.response?.status ?? 500;
-            if (status === 429 && attempt < maxRetries) {
-                // Free tier limits are often 15 requests per minute.
-                // We need longer delays to let the minute rollover.
-                // Delays: 5s, 10s, 20s, 30s, 60s
-                const delays = [5000, 10000, 20000, 30000, 60000];
-                const delay = delays[attempt] || 60000;
-                
-                console.log(`[LLM] Rate limit — retry ${attempt + 1}/${maxRetries} in ${delay / 1000}s`);
-                await sleep(delay);
-            } else {
-                const safe = new Error("Generation request failed due to API limits.");
-                safe.status = status;
-                throw safe;
-            }
-        }
-    }
-}
+// (generateWithRetry removed in favor of llmManager fallback)
 
 // ── Error helpers ─────────────────────────────────────────────────────────────
 
@@ -160,9 +135,9 @@ app.post("/api/legal/ask", askLimiter, async (req, res) => {
         if (!question) {
             return sendError(res, 400, "Question cannot be empty.");
         }
-        if (question.length < 2) {
-            return sendError(res, 400, "Question is too short.");
-        }
+        // if (question.length < 2) {
+        //     return sendError(res, 400, "Question is too short.");
+        // }
 
         console.log(`[ASK] New query (${question.length} chars)`);
 
@@ -170,18 +145,11 @@ app.post("/api/legal/ask", askLimiter, async (req, res) => {
         if (isCasualChat(question)) {
             console.log("[ASK] Detected casual chat — skipping Qdrant.");
 
-            const chatResponse = await generateWithRetry({
-                model:  "gemini-2.5-flash-lite",
-                config: {
-                    systemInstruction,
-                    temperature: 0.7,  // slightly warmer for casual chat
-                },
-                contents: question,
-            });
+            const chatResponse = await generate(question, systemInstruction, 0.7);
 
             return res.status(200).json({
                 success: true,
-                answer:  chatResponse.text,
+                answer:  chatResponse.answer,
             });
         }
 
@@ -211,19 +179,12 @@ app.post("/api/legal/ask", askLimiter, async (req, res) => {
             : `No matching legal context was found in the indexed database for this query.\n\nUser Question: ${question}`;
 
         console.log("[ASK] Generating answer…");
-        const aiResponse = await generateWithRetry({
-            model:  "gemini-2.5-flash-lite",
-            config: {
-                systemInstruction,
-                temperature: 0.1,  // strict temperature for legal responses
-            },
-            contents: prompt,
-        });
+        const aiResponse = await generate(prompt, systemInstruction, 0.1);
 
         console.log("[ASK] Done.");
         return res.status(200).json({
             success: true,
-            answer:  aiResponse.text,
+            answer:  aiResponse.answer,
         });
 
     } catch (err) {

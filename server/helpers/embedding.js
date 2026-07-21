@@ -42,4 +42,4 @@ async function createEmbedding(text, maxRetries = 4) {
     }
 }
 
-module.exports = { ai, createEmbedding };
+module.exports = { createEmbedding };
