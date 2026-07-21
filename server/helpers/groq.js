@@ -22,7 +22,7 @@ function sleep(ms) {
  */
 async function generate(prompt, systemInstruction, temperature = 0.1) {
     const maxRetries = 2;
-    const model = "llama3-8b-8192";
+    const model = "llama-3.3-70b-versatile";
     const client = getClient();
     
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
