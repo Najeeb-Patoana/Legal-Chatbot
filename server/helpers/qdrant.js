@@ -51,13 +51,13 @@ async function storeChunks(chunkPoints) {
  * @param {number}   [limit=5]    Max results to return
  * @returns {Promise<object[]>}   Array of payload objects
  */
-async function searchGlobalLegalContext(queryVector, limit = 5) {
+async function searchGlobalLegalContext(queryVector, limit = 15) {
     const results = await qdrant.search(COLLECTION, {
         vector: queryVector,
         limit,
         with_payload: true,
     });
-    return results.map((r) => r.payload);
+    return results.map((r) => ({ ...r.payload, _score: r.score }));
 }
 
 module.exports = { initializeQdrant, storeChunks, searchGlobalLegalContext };

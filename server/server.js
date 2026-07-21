@@ -158,18 +158,21 @@ app.post("/api/legal/ask", askLimiter, async (req, res) => {
         const queryVector = await createEmbedding(question);
 
         console.log("[ASK] Searching knowledge base…");
-        const contextPayloads = await searchGlobalLegalContext(queryVector, 5);
+        const contextPayloads = await searchGlobalLegalContext(queryVector, 15);
 
         // Build structured context block
         let contextBlock = "";
 
         if (contextPayloads.length > 0) {
+            console.log(`[ASK] Retrieved ${contextPayloads.length} items. Scores: ${contextPayloads.map(p => Number(p._score).toFixed(3)).join(', ')}`);
+            
             contextBlock = contextPayloads
                 .map((p, i) => {
                     const type     = p.documentType || "Unknown";
                     const citation = p.citation     || "No citation";
                     const text     = p.text         || "";
-                    return `--- RETRIEVED ITEM ${i + 1} ---\n[Type]: ${type}\n[Citation]: ${citation}\n\n${text}`;
+                    const score    = p._score ? ` (Score: ${Number(p._score).toFixed(3)})` : "";
+                    return `--- RETRIEVED ITEM ${i + 1}${score} ---\n[Type]: ${type}\n[Citation]: ${citation}\n\n${text}`;
                 })
                 .join("\n\n");
         }

@@ -7,6 +7,7 @@
     "dev": "nodemon server.js",
     "govinfo": "node workers/fetch_govinfo.js",
     "court": "node workers/fetch_court.js",
+    "constitution": "node workers/fetch_constitution.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -24,6 +25,7 @@
     "@qdrant/js-client-rest": "^1.18.0",
     "@xmldom/xmldom": "^0.9.8",
     "axios": "^1.18.1",
+    "constitution": "^1.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
