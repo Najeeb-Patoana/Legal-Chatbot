@@ -1,12 +1,12 @@
 /**
  * Chunk unstructured plain text into semantic groups.
  *
- * @param {string} text       Raw text (from PDFs, opinions, etc.)
- * @param {number} targetWords Target words per chunk (default 600)
+ * @param {string} text      Raw text (from PDFs, opinions, etc.)
+ * @param {number} targetWords Target words per chunk (Reduced to 300 for local model)
  * @param {number} minWords    Minimum words to keep a chunk (default 25)
  * @returns {string[]}
  */
-function chunkText(text, targetWords = 600, minWords = 25) {
+function chunkText(text, targetWords = 300, minWords = 25) {
     // ── 1. Split into paragraphs ──────────────────────────────────────────────
     const paragraphs = text
         .split(/\n{2,}/)            // blank-line boundaries
