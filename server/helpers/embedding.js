@@ -1,45 +1,35 @@
-const { GoogleGenAI } = require("@google/genai");
+const { pipeline } = require('@huggingface/transformers');
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+let extractorPromise = null;
 
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+async function getExtractor() {
+    if (!extractorPromise) {
+        console.log("[Embedding] Loading local model into memory...");
+        // 'all-MiniLM-L6-v2' is the gold standard for fast, local semantic search (384 dimensions)
+        extractorPromise = pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+            dtype: 'q8' // 8-bit quantization: smaller RAM footprint, great accuracy
+        });
+    }
+    return extractorPromise;
 }
 
 /**
-
- * @param {string} text
- * @param {number} [maxRetries=4]
- * @returns {Promise<number[]>} embedding vector
+ * @param {string} text - The text to embed
+ * @returns {Promise<number[]>} embedding vector (384 dimensions)
  */
-async function createEmbedding(text, maxRetries = 4) {
+async function createEmbedding(text) {
     if (!text || typeof text !== "string" || !text.trim()) {
         throw Object.assign(new Error("Empty text passed to createEmbedding"), { status: 400 });
     }
 
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        try {
-            const response = await ai.models.embedContent({
-                model:    "gemini-embedding-2",
-                contents: text.trim(),
-            });
-            await sleep(250); // throttle between consecutive calls
-            return response.embeddings[0].values;
-        } catch (err) {
-            const status = err?.status ?? err?.response?.status ?? 500;
+    const extractor = await getExtractor();
 
-            if (status === 429 && attempt < maxRetries) {
-                const delay = Math.pow(2, attempt + 1) * 1000; // 2s, 4s, 8s, 16s
-                console.log(`[Embedding] Rate limit — retry ${attempt + 1}/${maxRetries} in ${delay / 1000}s`);
-                await sleep(delay);
-            } else {
-                // Re-throw with only the status attached — never the raw message
-                const safe = new Error("Embedding request failed.");
-                safe.status = status;
-                throw safe;
-            }
-        }
-    }
+    // pooling: 'mean' averages token vectors into a sentence vector
+    // normalize: true is required for Cosine similarity in Qdrant
+    const output = await extractor(text.trim(), { pooling: 'mean', normalize: true });
+
+    // Convert the Float32Array to a standard JavaScript array
+    return Array.from(output.data);
 }
 
 module.exports = { createEmbedding };
