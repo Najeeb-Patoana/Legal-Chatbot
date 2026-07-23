@@ -3,10 +3,11 @@
   top: 0;
   z-index: 100;
   height: var(--nav-height);
-  background: var(--color-surface);
+  background: rgba(255, 255, 255, 0.97);
   border-bottom: 1px solid var(--color-border);
   backdrop-filter: blur(12px);
-  background: rgba(255, 255, 255, 0.92);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 
 .nav {
@@ -29,9 +30,10 @@
   width: 36px;
   height: 36px;
   border-radius: var(--radius-md);
-  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  background: linear-gradient(135deg, #0f766e, #059669);
   color: #fff;
   flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(15, 118, 110, 0.25);
 }
 
 .brandText {
@@ -68,10 +70,6 @@
 }
 
 @media (max-width: 480px) {
-  .brandTagline {
-    display: none;
-  }
-  .authorName {
-    font-size: 0.72rem;
-  }
+  .brandTagline { display: none; }
+  .authorName   { font-size: 0.72rem; }
 }

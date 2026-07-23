@@ -8,67 +8,56 @@
 }
 
 :root {
-  /* Color Palette — Teal / Emerald (preserved from original) */
-  --color-primary: #0F766E;
-  --color-primary-hover: #0D6E66;
-  --color-primary-light: #CCFBF1;
-  --color-secondary: #0D9488;
-  --color-accent: #059669;
-  --color-accent-light: #D1FAE5;
+  /* Brand — Teal */
+  --color-primary:       #0f766e;
+  --color-primary-hover: #0d6e66;
+  --color-primary-light: #f0fdfa;
+  --color-secondary:     #0d9488;
+  --color-accent:        #059669;
 
-  --color-bg: #F8FAFC;
-  --color-surface: #FFFFFF;
-  --color-border: #E5E7EB;
-  --color-border-focus: #0F766E;
+  /* Light Surfaces */
+  --color-bg:      #f8fafc;
+  --color-surface: #ffffff;
+  --color-border:  #e2e8f0;
+  --color-border-focus: #0f766e;
 
-  --color-text: #111827;
-  --color-text-muted: #6B7280;
-  --color-text-light: #9CA3AF;
+  /* Text */
+  --color-text:       #0f172a;
+  --color-text-muted: #475569;
+  --color-text-light: #94a3b8;
 
-  --color-success: #059669;
-  --color-success-light: #ECFDF5;
-  --color-success-border: #A7F3D0;
+  /* State */
+  --color-success:        #059669;
+  --color-success-light:  #ecfdf5;
+  --color-success-border: #a7f3d0;
+  --color-error:          #ef4444;
+  --color-error-light:    #fef2f2;
+  --color-error-border:   #fecaca;
+  --color-warning:        #f59e0b;
+  --color-warning-light:  #fffbeb;
 
-  --color-error: #EF4444;
-  --color-error-light: #FEF2F2;
-  --color-error-border: #FECACA;
-
-  --color-warning: #F59E0B;
-  --color-warning-light: #FFFBEB;
-
-  /* Chat-specific tokens */
-  --color-user-bubble: #0F766E;
-  --color-user-text: #FFFFFF;
-  --color-bot-bubble: #F1F5F9;
-  --color-bot-text: #1E293B;
-  --color-disclaimer-bg: #FEF3C7;
-  --color-disclaimer-border: #F59E0B;
-  --color-disclaimer-text: #92400E;
+  /* Chat bubbles */
+  --color-user-bubble:  #0f766e;
+  --color-user-text:    #ffffff;
+  --color-bot-bubble:   #ffffff;
+  --color-bot-text:     #0f172a;
 
   /* Typography */
   --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-heading: 'Outfit', 'Inter', -apple-system, sans-serif;
 
   /* Spacing */
-  --space-xs: 4px;
-  --space-sm: 8px;
-  --space-md: 16px;
-  --space-lg: 24px;
-  --space-xl: 32px;
-  --space-2xl: 48px;
-  --space-3xl: 64px;
+  --space-xs: 4px;  --space-sm: 8px;  --space-md: 16px;
+  --space-lg: 24px; --space-xl: 32px; --space-2xl: 48px; --space-3xl: 64px;
 
   /* Radius */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
-  --radius-full: 9999px;
+  --radius-sm: 6px; --radius-md: 10px; --radius-lg: 14px;
+  --radius-xl: 20px; --radius-full: 9999px;
 
   /* Shadows */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.07), 0 2px 6px rgba(0, 0, 0, 0.04);
-  --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.09), 0 4px 12px rgba(0, 0, 0, 0.05);
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md:    0 4px 16px rgba(0,0,0,0.07), 0 2px 6px rgba(0,0,0,0.04);
+  --shadow-lg:    0 10px 40px rgba(0,0,0,0.09), 0 4px 12px rgba(0,0,0,0.05);
   --shadow-focus: 0 0 0 3px rgba(15, 118, 110, 0.15);
 
   /* Transitions */
@@ -77,14 +66,12 @@
   --transition-slow: 300ms ease;
 
   /* Layout */
-  --max-width: 1200px;
-  --nav-height: 64px;
+  --max-width:   1200px;
+  --nav-height:  64px;
   --input-height: 80px;
 }
 
-html {
-  scroll-behavior: smooth;
-}
+html { scroll-behavior: smooth; }
 
 body {
   font-family: var(--font-family);
@@ -112,103 +99,48 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--color-text);
 }
 
-p {
-  color: var(--color-text-muted);
-  line-height: 1.7;
-}
+p { color: var(--color-text-muted); line-height: 1.7; }
 
 /* ============================================
    ANIMATIONS
    ============================================ */
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
-
 @keyframes fadeInScale {
-  from {
-    opacity: 0;
-    transform: scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+  from { opacity: 0; transform: scale(0.97); }
+  to   { opacity: 1; transform: scale(1); }
 }
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
+@keyframes spin    { to { transform: rotate(360deg); } }
+@keyframes pulse   { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 @keyframes slideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
-
 @keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(16px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
-
 @keyframes typingDot {
   0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
-  30% { opacity: 1; transform: translateY(-4px); }
+  30%           { opacity: 1;   transform: translateY(-4px); }
 }
 
-.animate-fade-in {
-  animation: fadeIn var(--transition-slow) ease both;
-}
-
-.animate-fade-in-scale {
-  animation: fadeInScale var(--transition-slow) ease both;
-}
-
-.animate-slide-up {
-  animation: slideUp 0.35s ease both;
-}
+.animate-fade-in       { animation: fadeIn var(--transition-slow) ease both; }
+.animate-fade-in-scale { animation: fadeInScale var(--transition-slow) ease both; }
+.animate-slide-up      { animation: slideUp 0.35s ease both; }
 
 /* ============================================
    SCROLLBAR
    ============================================ */
-::-webkit-scrollbar {
-  width: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: var(--color-bg);
-}
-
+::-webkit-scrollbar       { width: 6px; }
+::-webkit-scrollbar-track { background: var(--color-bg); }
 ::-webkit-scrollbar-thumb {
   background: var(--color-border);
   border-radius: var(--radius-full);
 }
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-light);
-}
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-light); }
 
 /* ============================================
    LAYOUT HELPERS
@@ -221,7 +153,5 @@ p {
 }
 
 @media (max-width: 768px) {
-  .container {
-    padding: 0 var(--space-md);
-  }
+  .container { padding: 0 var(--space-md); }
 }

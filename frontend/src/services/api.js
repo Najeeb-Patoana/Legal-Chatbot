@@ -34,16 +34,29 @@ function parseApiError(err) {
  * Routed through the server's intent detection.
  *
  * @param {string} question
+ * @param {{ token?: string }} opts  Optional auth token
  * @returns {Promise<string>} AI-generated answer
  */
-export async function askLegalQuestion(question) {
+export async function getGuestStatus() {
   try {
+    const response = await api.get('/api/legal/guest-status')
+    return response.data
+  } catch (err) {
+    throw new Error(parseApiError(err))
+  }
+}
+
+export async function askLegalQuestion(question, opts = {}) {
+  try {
+    const headers = { 'Content-Type': 'application/json' }
+    if (opts.token) headers['Authorization'] = `Bearer ${opts.token}`
+
     const response = await api.post(
       '/api/legal/ask',
       { question },
-      { headers: { 'Content-Type': 'application/json' } }
+      { headers }
     )
-    return response.data.answer
+    return response.data
   } catch (err) {
     throw new Error(parseApiError(err))
   }

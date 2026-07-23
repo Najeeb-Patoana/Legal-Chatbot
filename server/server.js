@@ -9,7 +9,29 @@ const rateLimit   = require("express-rate-limit");
 const { createEmbedding }              = require("./helpers/embedding");
 const { generate }                     = require("./helpers/llmManager");
 const { initializeQdrant,
-        searchGlobalLegalContext }          = require("./helpers/qdrant");
+        searchGlobalLegalContext }      = require("./helpers/qdrant");
+
+function getClientIp(req) {
+    let ip = req.ip || req.socket?.remoteAddress || "";
+
+    // Strip IPv6-mapped IPv4 prefix (e.g., "::ffff:127.0.0.1" -> "127.0.0.1")
+    if (ip.startsWith("::ffff:")) {
+        ip = ip.replace("::ffff:", "");
+    }
+
+    // Standardize IPv6 local loopback to IPv4
+    if (ip === "::1") {
+        ip = "127.0.0.1";
+    }
+
+    return ip;
+}
+
+// ── DB + Routes ───────────────────────────────────────────────────────────────
+const { initDB, pool } = require("./db");
+const jwt          = require("jsonwebtoken");
+const authRouter   = require("./routes/auth");
+const chatRouter   = require("./routes/chat");
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || "http://localhost:5173")
@@ -89,14 +111,17 @@ function sendError(res, status, publicMessage) {
 // ── App setup ─────────────────────────────────────────────────────────────────
 const app = express();
 
+// Enable proxy trusting (essential for accurate IP detection)
+app.set("trust proxy", 1);
+
 // Security headers (hide X-Powered-By, set CSP, etc.)
 app.use(helmet());
 
 // CORS — origins loaded from CORS_ORIGIN env var
 app.use(cors({
     origin: ALLOWED_ORIGINS,
-    methods: ["GET", "POST"],
-    allowedHeaders: ["Content-Type"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
     optionsSuccessStatus: 200,
 }));
 
@@ -119,6 +144,10 @@ app.get("/", (_req, res) => {
     res.json({ status: "ok", service: "US Legal Knowledge Base API" });
 });
 
+// Auth + Chat routes
+app.use("/api/auth", authRouter);
+app.use("/api/chat", chatRouter);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/legal/ask
 // Accepts: JSON { question: string }
@@ -128,6 +157,25 @@ app.get("/", (_req, res) => {
 //   1. Casual chat → direct LLM response (no Qdrant lookup)
 //   2. Legal query → embed → Qdrant search → contextual LLM response
 // ─────────────────────────────────────────────────────────────────────────────
+
+app.get("/api/legal/guest-status", async (req, res) => {
+    try {
+        const ip = getClientIp(req);
+        const limitResult = await pool.query(
+            "SELECT message_count FROM vl_guest_limits WHERE ip = $1", 
+            [ip]
+        );
+        let count = 0;
+        if (limitResult.rows.length > 0) {
+            count = limitResult.rows[0].message_count;
+        }
+        res.status(200).json({ usage: count, limit: 4 });
+    } catch (err) {
+        console.error("[GUEST STATUS] error", err);
+        res.status(500).json({ usage: 0, limit: 4 });
+    }
+});
+
 app.post("/api/legal/ask", askLimiter, async (req, res) => {
     try {
         const question = sanitize(req.body?.question, 1000);
@@ -141,6 +189,49 @@ app.post("/api/legal/ask", askLimiter, async (req, res) => {
 
         console.log(`[ASK] New query (${question.length} chars)`);
 
+        // ── Guest Limit Enforcement ────────────────────────────────────────
+        const authHeader = req.headers.authorization;
+        let isAuthenticated = false;
+        let currentGuestUsage = undefined;
+        const GUEST_LIMIT = 4;
+
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+            const token = authHeader.split(" ")[1];
+            try {
+                jwt.verify(token, process.env.JWT_SECRET);
+                isAuthenticated = true;
+            } catch (err) {
+                // Ignore invalid token, treat as guest
+            }
+        }
+
+        if (!isAuthenticated) {
+            // Extract normalized IP address
+            const ip = getClientIp(req);
+            console.log(`[GUEST LIMIT DEBUG] Client IP: "${ip}"`);
+            const limitResult = await pool.query(
+                "SELECT message_count FROM vl_guest_limits WHERE ip = $1", 
+                [ip]
+            );
+            
+            let count = 0;
+            if (limitResult.rows.length > 0) {
+                count = limitResult.rows[0].message_count;
+            }
+            
+            if (count >= GUEST_LIMIT) {
+                return sendError(res, 403, "Free limit reached. Please sign in to continue.");
+            }
+            
+            await pool.query(
+                `INSERT INTO vl_guest_limits (ip, message_count) 
+                 VALUES ($1, 1) 
+                 ON CONFLICT (ip) DO UPDATE SET message_count = vl_guest_limits.message_count + 1, last_request = NOW()`,
+                [ip]
+            );
+            currentGuestUsage = count + 1;
+        }
+
         // ── Intent 1: Casual chat ─────────────────────────────────────────
         if (isCasualChat(question)) {
             console.log("[ASK] Detected casual chat — skipping Qdrant.");
@@ -150,6 +241,8 @@ app.post("/api/legal/ask", askLimiter, async (req, res) => {
             return res.status(200).json({
                 success: true,
                 answer:  chatResponse.answer,
+                guestUsage: currentGuestUsage,
+                guestLimit: GUEST_LIMIT
             });
         }
 
@@ -188,6 +281,8 @@ app.post("/api/legal/ask", askLimiter, async (req, res) => {
         return res.status(200).json({
             success: true,
             answer:  aiResponse.answer,
+            guestUsage: currentGuestUsage,
+            guestLimit: GUEST_LIMIT
         });
 
     } catch (err) {
@@ -211,6 +306,15 @@ app.use((err, _req, res, _next) => {
 
 // ── Startup ───────────────────────────────────────────────────────────────────
 async function start() {
+    // Initialize PostgreSQL schema
+    try {
+        await initDB();
+    } catch (err) {
+        console.error("[Server] DB init failed:", err.message);
+        process.exit(1);
+    }
+
+    // Initialize Qdrant
     try {
         console.log("[Server] Connecting to Qdrant…");
         await initializeQdrant();
@@ -221,7 +325,11 @@ async function start() {
 
     app.listen(PORT, () => {
         console.log(`US Legal Knowledge Base server  -->  http://localhost:${PORT}`);
-        console.log("  POST /api/legal/ask  -- ask a legal question or chat");
+        console.log("  POST /api/legal/ask       -- ask a legal question or chat");
+        console.log("  POST /api/auth/register   -- create account");
+        console.log("  POST /api/auth/login      -- login");
+        console.log("  POST /api/auth/google     -- Google OAuth");
+        console.log("  GET  /api/chat/sessions   -- list chat history");
         console.log(`  Allowed origins: ${ALLOWED_ORIGINS.join(", ")}`);
     });
 }
