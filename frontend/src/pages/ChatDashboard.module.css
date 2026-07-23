@@ -1,6 +1,3 @@
-/* ============================================
-   CHAT DASHBOARD — Premium ChatGPT-style layout
-   ============================================ */
 
 /* ── Container ────────────────────────────── */
 .container {
@@ -10,34 +7,6 @@
   max-height: calc(100vh - var(--nav-height));
   overflow: hidden;
   background: var(--color-bg);
-}
-
-/* ── Disclaimer Banner ────────────────────── */
-.banner {
-  background: linear-gradient(135deg, #FEF3C7, #FDE68A);
-  border-bottom: 1px solid #F59E0B;
-  flex-shrink: 0;
-}
-
-.bannerInner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: 880px;
-  margin: 0 auto;
-  padding: 8px 24px;
-}
-
-.bannerIcon {
-  color: #B45309;
-  flex-shrink: 0;
-}
-
-.bannerText {
-  font-size: 0.74rem;
-  line-height: 1.5;
-  color: #92400E;
-  margin: 0;
 }
 
 /* ── Messages Area ────────────────────────── */
