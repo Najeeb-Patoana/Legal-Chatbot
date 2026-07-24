@@ -7,83 +7,38 @@ import {
 } from 'react-icons/fi'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { askLegalQuestion, getGuestStatus } from '../services/api.js'
-import * as chatApi from '../services/authApi.js'
+import { useChat } from '../context/ChatContext'
 import styles from './ChatDashboard.module.css'
 import sidebarStyles from '../styles/Sidebar.module.css'
 
-const FREE_LIMIT = 4
-const GUEST_COUNT_KEY = 'vl_guestMsgCount'
-
 export default function ChatDashboard() {
-  const { user, accessToken, logout } = useAuth()
+  const { user, logout } = useAuth()
+  const {
+    sessions, activeSession, messages,
+    isLoading, sessionsLoading,
+    guestCount, FREE_LIMIT,
+    handleNewChat, handleSelectSession, handleDeleteSession, sendMessage,
+  } = useChat()
 
-  // ── Chat state ─────────────────────────────────────────────────────────────
-  const [sessions, setSessions]           = useState([])
-  const [activeSession, setActiveSession] = useState(null)
-  const [messages, setMessages]           = useState([])
-  const [input, setInput]                 = useState('')
-  const [isLoading, setIsLoading]         = useState(false)
-  const [copiedId, setCopiedId]           = useState(null)
-  const [sessionsLoading, setSessionsLoading] = useState(false)
-  const [sidebarOpen, setSidebarOpen]     = useState(true)
+  // ── Local UI-only state ────────────────────────────────────────────────────
+  const [input,          setInput]          = useState('')
+  const [sidebarOpen,    setSidebarOpen]    = useState(true)
   const [showLimitModal, setShowLimitModal] = useState(false)
+  const [copiedId,       setCopiedId]       = useState(null)
 
-  // Guest message count — persisted in localStorage
-  const [guestCount, setGuestCount] = useState(() => {
-    if (typeof window === 'undefined') return 0
-    return parseInt(localStorage.getItem(GUEST_COUNT_KEY) || '0', 10)
-  })
-
+  // ── DOM refs ───────────────────────────────────────────────────────────────
   const messagesEndRef = useRef(null)
   const textareaRef    = useRef(null)
 
-  // ── Load guest status ──────────────────────────────────────────────────────
-  useEffect(() => {
-    if (user) return
-    getGuestStatus()
-      .then((data) => {
-        if (data && typeof data.usage === 'number') {
-          setGuestCount(data.usage)
-          localStorage.setItem(GUEST_COUNT_KEY, String(data.usage))
-        }
-      })
-      .catch(console.error)
-  }, [user])
-
-  // ── Load sessions (authenticated only) ────────────────────────────────────
-  useEffect(() => {
-    if (!accessToken) return
-    setSessionsLoading(true)
-    chatApi.getSessions()
-      .then((data) => { if (data.success) setSessions(data.sessions) })
-      .catch(console.error)
-      .finally(() => setSessionsLoading(false))
-  }, [accessToken])
-
-  // ── Load messages when active session changes ──────────────────────────────
-  useEffect(() => {
-    if (!activeSession || !accessToken) { setMessages([]); return }
-    chatApi.getMessages(activeSession.session_id)
-      .then((data) => {
-        if (data.success) {
-          setMessages(data.messages.map((m) => ({
-            id:   m.message_id,
-            role: m.role,
-            text: m.content,
-            time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          })))
-        }
-      })
-      .catch(console.error)
-  }, [activeSession, accessToken])
-
-  // ── Auto-scroll ────────────────────────────────────────────────────────────
+  // ── Auto-scroll on new messages / typing indicator ────────────────────────
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
 
-  useEffect(() => { textareaRef.current?.focus() }, [activeSession])
+  // ── Focus textarea when session changes ────────────────────────────────────
+  useEffect(() => {
+    textareaRef.current?.focus()
+  }, [activeSession])
 
   // ── Auto-resize textarea ───────────────────────────────────────────────────
   const adjustTextareaHeight = useCallback(() => {
@@ -94,122 +49,23 @@ export default function ChatDashboard() {
   }, [])
   useEffect(() => { adjustTextareaHeight() }, [input, adjustTextareaHeight])
 
-  // ── Copy ───────────────────────────────────────────────────────────────────
+  // ── Copy response ──────────────────────────────────────────────────────────
   const handleCopy = useCallback((text, id) => {
     navigator.clipboard.writeText(text)
     setCopiedId(id)
     setTimeout(() => setCopiedId(null), 2000)
   }, [])
 
-  // ── New chat ───────────────────────────────────────────────────────────────
-  const handleNewChat = () => {
-    setActiveSession(null)
-    setMessages([])
-    textareaRef.current?.focus()
-  }
-
-  // ── Select session ─────────────────────────────────────────────────────────
-  const handleSelectSession = (session) => {
-    if (activeSession?.session_id === session.session_id) return
-    setActiveSession(session)
-    setMessages([])
-  }
-
-  // ── Delete session ─────────────────────────────────────────────────────────
-  const handleDeleteSession = async (e, sessionId) => {
-    e.stopPropagation()
-    try {
-      await chatApi.deleteSession(sessionId)
-      setSessions((prev) => prev.filter((s) => s.session_id !== sessionId))
-      if (activeSession?.session_id === sessionId) {
-        setActiveSession(null)
-        setMessages([])
-      }
-    } catch (err) {
-      console.error('Delete session error:', err)
-    }
-  }
-
-  // ── Send message ───────────────────────────────────────────────────────────
+  // ── Send: delegate to context, handle the limit-modal signal ──────────────
   const handleSend = async () => {
     const trimmed = input.trim()
     if (!trimmed || isLoading) return
-
-    // Guest limit check
-    if (!user) {
-      if (guestCount >= FREE_LIMIT) {
-        setShowLimitModal(true)
-        return
-      }
-    }
-
-    let currentSession = activeSession
-
-    // Authenticated: create a new session named after the first message
-    if (user && accessToken && !currentSession) {
-      try {
-        const title = trimmed.slice(0, 50)
-        const data  = await chatApi.createSession(title)
-        if (data.success) {
-          currentSession = data.session
-          setActiveSession(data.session)
-          setSessions((prev) => [data.session, ...prev])
-        }
-      } catch (err) {
-        console.error('Create session error:', err)
-      }
-    }
-
-    const userMessage = {
-      id:   Date.now(),
-      role: 'user',
-      text: trimmed,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    }
-
-    setMessages((prev) => [...prev, userMessage])
     setInput('')
-    setIsLoading(true)
-
-    // Save user message to DB (authenticated only)
-    if (currentSession && accessToken) {
-      chatApi.saveMessage(currentSession.session_id, 'user', trimmed).catch(console.error)
-    }
-
-    try {
-      const resData = await askLegalQuestion(trimmed, { token: accessToken || undefined })
-
-      if (!user && resData.guestUsage !== undefined) {
-        setGuestCount(resData.guestUsage)
-        localStorage.setItem(GUEST_COUNT_KEY, String(resData.guestUsage))
-      }
-
-      const answer = resData.answer
-      const assistantMsg = {
-        id:   Date.now() + 1,
-        role: 'assistant',
-        text: answer,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      }
-      setMessages((prev) => [...prev, assistantMsg])
-
-      // Save assistant message (authenticated only)
-      if (currentSession && accessToken) {
-        chatApi.saveMessage(currentSession.session_id, 'assistant', answer).catch(console.error)
-      }
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id:      Date.now() + 1,
-          role:    'assistant',
-          text:    err.message || 'Something went wrong. Please try again.',
-          isError: true,
-          time:    new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ])
-    } finally {
-      setIsLoading(false)
+    const result = await sendMessage(trimmed)
+    if (result?.limitReached) {
+      setInput(trimmed) // restore so the user doesn't lose their text
+      setShowLimitModal(true)
+    } else {
       textareaRef.current?.focus()
     }
   }
@@ -221,6 +77,12 @@ export default function ChatDashboard() {
   const useSuggestion = (text) => {
     setInput(text)
     textareaRef.current?.focus()
+  }
+
+  // ── Wrappers that keep stopPropagation in the UI layer ─────────────────────
+  const onDeleteSession = (e, sessionId) => {
+    e.stopPropagation()
+    handleDeleteSession(sessionId)
   }
 
   // ── Render helpers ─────────────────────────────────────────────────────────
@@ -252,11 +114,13 @@ export default function ChatDashboard() {
     })
   }
 
+  // ── Derived display values ─────────────────────────────────────────────────
   const initials = user?.name
     ? user.name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase()
     : '?'
 
   const remainingFree = Math.max(0, FREE_LIMIT - guestCount)
+  const guestAtLimit  = !user && guestCount >= FREE_LIMIT
 
   const suggestions = [
     { icon: <FiBookmark size={16} />, text: 'What is the punishment for bank robbery?' },
@@ -268,7 +132,7 @@ export default function ChatDashboard() {
   return (
     <div className={styles.layout}>
 
-      {/* ── Sidebar — only for authenticated users ── */}
+      {/* ── Sidebar — authenticated users only ── */}
       {user && (
         <aside className={`${sidebarStyles.sidebar} ${!sidebarOpen ? sidebarStyles.sidebarHidden : ''}`}>
           <div className={sidebarStyles.sidebarTop}>
@@ -290,7 +154,9 @@ export default function ChatDashboard() {
               sessions.map((session) => (
                 <div
                   key={session.session_id}
-                  className={`${sidebarStyles.sessionItem} ${activeSession?.session_id === session.session_id ? sidebarStyles.active : ''}`}
+                  className={`${sidebarStyles.sessionItem} ${
+                    activeSession?.session_id === session.session_id ? sidebarStyles.active : ''
+                  }`}
                   onClick={() => handleSelectSession(session)}
                   id={`session-${session.session_id}`}
                   role="button"
@@ -303,7 +169,7 @@ export default function ChatDashboard() {
                   </span>
                   <button
                     className={sidebarStyles.deleteBtn}
-                    onClick={(e) => handleDeleteSession(e, session.session_id)}
+                    onClick={(e) => onDeleteSession(e, session.session_id)}
                     aria-label={`Delete ${session.title}`}
                   >
                     <FiTrash2 size={12} />
@@ -329,10 +195,10 @@ export default function ChatDashboard() {
         </aside>
       )}
 
-      {/* ── Main Chat Area ── */}
+      {/* ── Main chat area ── */}
       <div className={styles.container}>
 
-        {/* Mobile sidebar toggle (auth only) */}
+        {/* Mobile sidebar toggle */}
         {user && (
           <button
             className={styles.sidebarToggle}
@@ -344,7 +210,7 @@ export default function ChatDashboard() {
           </button>
         )}
 
-        {/* ── Guest free-tier banner ── */}
+        {/* Guest free-tier banner */}
         {!user && guestCount > 0 && guestCount < FREE_LIMIT && (
           <div className={styles.guestBanner}>
             <FiLock size={13} />
@@ -355,7 +221,7 @@ export default function ChatDashboard() {
           </div>
         )}
 
-        {/* Messages */}
+        {/* Message thread */}
         <div className={styles.messages} id="chat-messages-area">
           {messages.length === 0 ? (
             <div className={styles.empty}>
@@ -372,7 +238,6 @@ export default function ChatDashboard() {
                 Responses are grounded in indexed legal documents with inline citations.
               </p>
 
-              {/* Guest CTA */}
               {!user && (
                 <div className={styles.guestCta}>
                   <Link to="/login" className={styles.guestCtaBtn} id="guest-login-cta">
@@ -440,7 +305,7 @@ export default function ChatDashboard() {
                 </div>
               ))}
 
-              {/* Animated typing indicator */}
+              {/* Typing indicator */}
               {isLoading && (
                 <div className={`${styles.row} ${styles.assistant}`}>
                   <div className={`${styles.avatar} ${styles.av_assistant}`}>
@@ -466,29 +331,25 @@ export default function ChatDashboard() {
           )}
         </div>
 
-        {/* Input */}
+        {/* Input bar */}
         <div className={styles.inputArea}>
           <div className={styles.inputWrap}>
             <textarea
               ref={textareaRef}
               id="chat-input"
               className={styles.textarea}
-              placeholder={
-                !user && guestCount >= FREE_LIMIT
-                  ? 'Sign in to continue chatting…'
-                  : 'Ask a legal question…'
-              }
+              placeholder={guestAtLimit ? 'Sign in to continue chatting…' : 'Ask a legal question…'}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={1}
-              disabled={isLoading || (!user && guestCount >= FREE_LIMIT)}
+              disabled={isLoading || guestAtLimit}
               aria-label="Type your message"
             />
             <button
               className={styles.sendBtn}
               onClick={handleSend}
-              disabled={!input.trim() || isLoading || (!user && guestCount >= FREE_LIMIT)}
+              disabled={!input.trim() || isLoading || guestAtLimit}
               title="Send message (Enter)"
               aria-label="Send message"
               id="send-btn"
@@ -505,7 +366,7 @@ export default function ChatDashboard() {
         </div>
       </div>
 
-      {/* ── Limit reached modal ── */}
+      {/* Free-limit modal */}
       {showLimitModal && (
         <div className={styles.modalOverlay} onClick={() => setShowLimitModal(false)}>
           <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
