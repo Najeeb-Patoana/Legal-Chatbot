@@ -23,7 +23,7 @@ export default function Navbar() {
         {/* Right side — only show if not logged in (logged-in user info is in sidebar) */}
         {!user && (
           <div className={styles.author}>
-            <span className={styles.authorName}>AI-Powered Legal Research</span>
+            <span className={styles.authorName}>Najeeb Ullah Khan</span>
           </div>
         )}
       </div>

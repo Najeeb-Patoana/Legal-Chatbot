@@ -7,7 +7,7 @@ const AuthContext = createContext(null)
 export function AuthProvider({ children }) {
   const [user, setUser]               = useState(null)
   const [accessToken, setAccessToken] = useState(null)
-  const [loading, setLoading]         = useState(true)  // silent refresh on mount
+  const [loading, setLoading]         = useState(true)  
 
   // ── Silent token refresh on page load ──────────────────────────────────────
   useEffect(() => {

@@ -55,16 +55,16 @@ export default function ChatDashboard() {
   useEffect(() => {
     if (!accessToken) return
     setSessionsLoading(true)
-    chatApi.getSessions(accessToken)
+    chatApi.getSessions()
       .then((data) => { if (data.success) setSessions(data.sessions) })
       .catch(console.error)
       .finally(() => setSessionsLoading(false))
   }, [accessToken])
 
-  // ── Load messages when session changes ─────────────────────────────────────
+  // ── Load messages when active session changes ──────────────────────────────
   useEffect(() => {
     if (!activeSession || !accessToken) { setMessages([]); return }
-    chatApi.getMessages(accessToken, activeSession.session_id)
+    chatApi.getMessages(activeSession.session_id)
       .then((data) => {
         if (data.success) {
           setMessages(data.messages.map((m) => ({
@@ -119,7 +119,7 @@ export default function ChatDashboard() {
   const handleDeleteSession = async (e, sessionId) => {
     e.stopPropagation()
     try {
-      await chatApi.deleteSession(accessToken, sessionId)
+      await chatApi.deleteSession(sessionId)
       setSessions((prev) => prev.filter((s) => s.session_id !== sessionId))
       if (activeSession?.session_id === sessionId) {
         setActiveSession(null)
@@ -145,11 +145,11 @@ export default function ChatDashboard() {
 
     let currentSession = activeSession
 
-    // Authenticated: create session if needed
+    // Authenticated: create a new session named after the first message
     if (user && accessToken && !currentSession) {
       try {
         const title = trimmed.slice(0, 50)
-        const data  = await chatApi.createSession(accessToken, title)
+        const data  = await chatApi.createSession(title)
         if (data.success) {
           currentSession = data.session
           setActiveSession(data.session)
@@ -173,17 +173,17 @@ export default function ChatDashboard() {
 
     // Save user message to DB (authenticated only)
     if (currentSession && accessToken) {
-      chatApi.saveMessage(accessToken, currentSession.session_id, 'user', trimmed).catch(console.error)
+      chatApi.saveMessage(currentSession.session_id, 'user', trimmed).catch(console.error)
     }
 
     try {
       const resData = await askLegalQuestion(trimmed, { token: accessToken || undefined })
-      
+
       if (!user && resData.guestUsage !== undefined) {
         setGuestCount(resData.guestUsage)
         localStorage.setItem(GUEST_COUNT_KEY, String(resData.guestUsage))
       }
-      
+
       const answer = resData.answer
       const assistantMsg = {
         id:   Date.now() + 1,
@@ -195,16 +195,7 @@ export default function ChatDashboard() {
 
       // Save assistant message (authenticated only)
       if (currentSession && accessToken) {
-        chatApi.saveMessage(accessToken, currentSession.session_id, 'assistant', answer).catch(console.error)
-      }
-
-      // Auto-title session on first message
-      if (currentSession && currentSession.title === 'New Chat' && accessToken) {
-        const newTitle = trimmed.slice(0, 45)
-        chatApi.renameSession(accessToken, currentSession.session_id, newTitle).catch(console.error)
-        setSessions((prev) => prev.map((s) =>
-          s.session_id === currentSession.session_id ? { ...s, title: newTitle } : s
-        ))
+        chatApi.saveMessage(currentSession.session_id, 'assistant', answer).catch(console.error)
       }
     } catch (err) {
       setMessages((prev) => [
@@ -268,7 +259,7 @@ export default function ChatDashboard() {
   const remainingFree = Math.max(0, FREE_LIMIT - guestCount)
 
   const suggestions = [
-    { icon: <FiBookmark size={16} />, text: 'What does 17 USC § 107 say about fair use?' },
+    { icon: <FiBookmark size={16} />, text: 'What is the punishment for bank robbery?' },
     { icon: <FiBookOpen size={16} />, text: 'Explain the Fourth Amendment protections against unreasonable searches' },
     { icon: <FiHelpCircle size={16} />, text: 'What is the legal standard for summary judgment in federal court?' },
   ]
@@ -359,7 +350,7 @@ export default function ChatDashboard() {
             <FiLock size={13} />
             <span>
               {remainingFree} free {remainingFree === 1 ? 'message' : 'messages'} remaining ·{' '}
-              <Link to="/login" className={styles.guestBannerLink}>Sign in</Link> for unlimited access & history
+              <Link to="/login" className={styles.guestBannerLink}>Sign in</Link> for unlimited access &amp; history
             </span>
           </div>
         )}

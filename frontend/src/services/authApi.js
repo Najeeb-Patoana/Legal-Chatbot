@@ -1,8 +1,8 @@
 import axios from 'axios'
 
-const API = axios.create({ baseURL: 'http://localhost:3000' })
-
-// ── Token Management for Interceptor ──────────────────────────────────────────
+const API = axios.create({ 
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3000' 
+})
 let currentToken = null;
 
 // The AuthProvider will call this to give Axios the token behind the scenes
@@ -10,7 +10,6 @@ export const setApiToken = (token) => {
   currentToken = token;
 }
 
-// ── The Interceptor ───────────────────────────────────────────────────────────
 API.interceptors.request.use(
   (config) => {
     if (currentToken) {
